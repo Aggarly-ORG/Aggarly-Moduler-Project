@@ -1,0 +1,47 @@
+name: ✨ Feature Request
+description: Propose a new feature, agent tool, or architectural improvement
+title: "[FEAT]: "
+labels: ["enhancement", "proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We welcome proposals for new features, agent capabilities, or optimizations!
+  - type: dropdown
+    id: module
+    attributes:
+      label: Target Module
+      description: Which module will this feature expand?
+      options:
+        - "aiagent (Multi-Agent & Concierge)"
+        - "vision (Visual Search & Image Analysis)"
+        - "property (Listings & Images)"
+        - "booking (Reservations & Availability)"
+        - "payment (Stripe / Transactions)"
+        - "user (Auth, JWT, MFA, RBAC)"
+        - "notification (STOMP WebSocket / Email / Push)"
+        - "filestorage (S3 / MinIO / Local)"
+        - "review (Ratings & Moderation)"
+        - "other / architecture"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: Is your feature request related to a problem or missing capability?
+      placeholder: "I'm always frustrated when..."
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: A clear and concise description of what you want to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions or features you've considered.

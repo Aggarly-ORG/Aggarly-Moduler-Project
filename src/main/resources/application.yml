@@ -1,0 +1,237 @@
+# ===================================================================
+# Aggarly — Property Rental Platform
+# Shared Application Configuration
+# ===================================================================
+# This file contains configuration shared across all profiles.
+# Profile-specific config is in application-{profile}.yml
+# ===================================================================
+
+spring:
+  application:
+    name: aggarly
+
+  profiles:
+    active: dev
+
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.autoconfigure.ollama.OllamaAutoConfiguration
+      - org.springframework.ai.autoconfigure.chat.client.ChatClientAutoConfiguration
+      - org.springframework.ai.autoconfigure.retry.SpringAiRetryAutoConfiguration
+
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID:159461480091-brh0872bvtb8rm2an93h6fck7i3cerhn.apps.googleusercontent.com}
+            client-secret: ${GOOGLE_CLIENT_SECRET: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}
+            scope:
+              - email
+              - profile
+          github:
+            client-id: ${GITHUB_CLIENT_ID:github-placeholder-client-id}
+            client-secret: ${GITHUB_CLIENT_SECRET:github-placeholder-client-secret}
+            scope:
+              - user:email
+              - read:user
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+        id:
+          new_generator_mappings: true
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
+
+  jackson:
+    default-property-inclusion: non_null
+    time-zone: UTC
+
+  mvc:
+    problemdetails:
+      enabled: true
+
+server:
+  port: 8081
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: never
+    include-exception: false
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{correlationId}] %-5level %logger{36} - %msg%n"
+  level:
+    root: INFO
+    com.luna.aggarly: DEBUG
+    org.springframework.security: INFO
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql: TRACE
+    org.flywaydb: INFO
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+    display-request-duration: true
+  show-actuator: false
+app:
+  jwt:
+    secret: ${JWT_SECRET:aggarly-dev-secret-key-must-be-at-least-256-bits-long-for-hs256}
+    access-token-expiration-ms: 900000       # 15 minutes
+    refresh-token-expiration-ms: 604800000   # 7 days
+
+  storage:
+    bucket-name: ${BUCKET_NAME:aggarly}
+    max-file-size: ${MAX_FILE_SIZE:10485760}
+    presigned-expiration: ${PRESIGNED_EXPIRATION:15}
+    temporary-life-time: ${TEMPORARY_LIFE_TIME:24}
+    allowed-types: ${ALLOWED_TYPES:image/jpeg,image/png,image/webp}
+
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:5173}
+    allowed-methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+    allowed-headers: "*"
+    allow-credentials: true
+
+  minio:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:aggarly_minio}
+    secret-key: ${MINIO_SECRET_KEY:aggarly_minio_secret}
+    bucket-name: ${MINIO_BUCKET:aggarly-files}
+
+  stripe:
+    secret-key: ${STRIPE_SECRET_KEY:sk_test_51TzduSJeiidUdOv3Fc80rxlfFv5dIHFyY8kDEnuD9J5m2OZVeiVbutm7u12zJ1nTXca2MWT61lVTP6vemhJvwlIj00tCva3FN8}
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET:whsec_8cf04d610b10c64e6f9a9af4e3b84cb64f62844c4ea1149122e03c7b78367db3}
+
+  mail:
+    from: ${MAIL_FROM:noreply@aggarly.com}
+
+  oauth2:
+    frontend-redirect-url: ${OAUTH2_REDIRECT_URL:http://localhost:8081/oauth2-success.html}
+    refresh-expiration-days: 7
+
+# ===================================================================
+# Vision & Vector Engine Configuration
+# ===================================================================
+aggarly:
+  # --- Qdrant Vector DB ---
+  qdrant:
+    host: ${QDRANT_HOST:localhost}
+    port: ${QDRANT_PORT:6334}
+    api-key: ${QDRANT_API_KEY:}
+    use-tls: ${QDRANT_TLS:false}
+    collections:
+      images: property_images_v1
+      profiles: property_visual_profiles_v1
+      descriptions: property_descriptions_v1
+    vector-dim: 768
+
+  # --- Vision Processing Pipeline & Search ---
+  vision:
+    # Preprocessing
+    preprocessing:
+      max-width-px: 1024
+      max-height-px: 1024
+      output-quality: 0.92
+      allowed-content-types:
+        - image/jpeg
+        - image/png
+        - image/webp
+
+    # Confidence Thresholds
+    confidence:
+      min-style-tag: 0.65
+      min-object: 0.70
+      min-amenity: 0.72
+      min-scene: 0.60
+      min-moderation: 0.80
+
+    # Model Tiers
+    models:
+      perception:
+        vlm: ${VISION_VLM_MODEL:gemma4:31b-cloud}
+        timeout-ms: 45000
+      embedding:
+        image-model: ${VISION_EMBED_IMAGE_MODEL:nomic-embed-text}
+        text-model: ${VISION_EMBED_TEXT_MODEL:nomic-embed-text}
+        dimension: 768
+        timeout-ms: 10000
+      reranking:
+        cheap-ml-enabled: true
+        cheap-ml-model: bge-reranker-base
+        llm-judge-enabled: true
+        llm-judge-model: ${VISION_RERANK_MODEL:gemma3:4b}
+        llm-timeout-ms: 8000
+
+    # Redis Cache TTLs
+    cache:
+      inference-ttl-days: 7
+      embedding-ttl-days: 30
+      description-ttl-hours: 24
+
+    # Background Workers
+    worker:
+      max-concurrent: 3
+      poll-interval-ms: 2000
+      lease-duration-seconds: 120
+      heartbeat-interval-seconds: 60
+      task-timeout-minutes: 10
+      dead-letter-retry-cron: "0 0 */6 * * *"
+
+    # Search & Fusion Weights
+    search:
+      default-page-size: 10
+      image-channel-limit: 150
+      caption-channel-limit: 150
+      description-channel-limit: 50
+      min-image-similarity-score: 0.40
+      min-property-coverage-score: 0.30
+      pre-rerank-candidate-limit: 20
+      fusion-weights:
+        text-only:
+          image-vector: 0.10
+          caption-vector: 0.50
+          description-vector: 0.40
+        image-only:
+          image-vector: 0.80
+          caption-vector: 0.15
+          description-vector: 0.05
+        multimodal:
+          image-vector: 0.45
+          caption-vector: 0.35
+          description-vector: 0.20
+      property-score-weights:
+        target-scene: 0.40
+        description: 0.35
+        secondary-avg: 0.15
+        room-bonus-max: 0.20
+
+    # Property Profile Aggregation
+    profile:
+      min-usable-images: 3
+      centroid-cover-multiplier: 1.5
+      key-room-types:
+        - BEDROOM
+        - BATHROOM
+        - KITCHEN
+        - LIVING_ROOM
+        - EXTERIOR
+        - VIEW
+
+

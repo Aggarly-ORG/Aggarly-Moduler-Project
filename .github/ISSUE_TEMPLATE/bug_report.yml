@@ -1,0 +1,60 @@
+name: 🐛 Bug Report
+description: Report a reproducible bug or unexpected error in Aggarly
+title: "[BUG]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue! Please fill out the form below with as much detail as possible.
+  - type: dropdown
+    id: module
+    attributes:
+      label: Affected Module
+      description: Which architectural module does this issue affect?
+      options:
+        - "aiagent (Multi-Agent & Concierge)"
+        - "vision (Visual Search & Image Analysis)"
+        - "property (Listings & Images)"
+        - "booking (Reservations & Availability)"
+        - "payment (Stripe / Transactions)"
+        - "user (Auth, JWT, MFA, RBAC)"
+        - "notification (STOMP WebSocket / Email / Push)"
+        - "filestorage (S3 / MinIO / Local)"
+        - "review (Ratings & Moderation)"
+        - "audit / security"
+        - "other"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description of the Bug
+      description: A clear and concise description of what the bug is.
+      placeholder: "When performing visual search with query 'sea view'..."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Send POST request to `/api/v1/...`
+        2. With payload `{ ... }`
+        3. See error response code ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or Stacktrace
+      description: Paste any relevant Spring Boot logs, Hibernate SQL, or error stacktraces.
+      render: shell

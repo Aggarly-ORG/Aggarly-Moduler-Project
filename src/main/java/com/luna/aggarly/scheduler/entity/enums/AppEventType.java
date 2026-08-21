@@ -1,0 +1,16 @@
+package com.luna.aggarly.scheduler.entity.enums;
+
+public enum AppEventType {
+    USER_REGISTERED,
+    BOOKING_CREATED,
+    BOOKING_CONFIRMED,
+    BOOKING_CANCELLED,
+    BOOKING_MODIFIED,
+    BOOKING_CHECK_IN,
+    BOOKING_CHECK_OUT,
+    PAYMENT_SUCCEEDED,
+    PAYMENT_FAILED,
+    PROPERTY_CREATED,
+    PROPERTY_PUBLISHED,
+    PROPERTY_BOOKED
+}

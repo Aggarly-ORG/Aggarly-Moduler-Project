@@ -1,0 +1,88 @@
+# ===================================================================
+# Aggarly — Production Profile
+# ===================================================================
+# All sensitive values MUST be injected via environment variables.
+# Do NOT hardcode secrets here.
+# ===================================================================
+
+spring:
+  # ========================
+  # DataSource
+  # ========================
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USERNAME}
+    password: ${DATABASE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: AggarlyCorePool
+      maximum-pool-size: 20
+      minimum-idle: 10
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  # ========================
+  # JPA
+  # ========================
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+
+  # ========================
+  # Redis
+  # ========================
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+      timeout: 6000ms
+
+  # ========================
+  # Mail (production SMTP)
+  # ========================
+  mail:
+    host: ${MAIL_HOST}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
+  # ========================
+  # Flyway
+  # ========================
+  flyway:
+    clean-disabled: true  # NEVER allow clean in production
+
+  # ========================
+  # Docker Compose — disabled in prod
+  # ========================
+  docker:
+    compose:
+      enabled: false
+
+# ===================================================================
+# Server
+# ===================================================================
+server:
+  port: ${SERVER_PORT:8080}
+
+# ===================================================================
+# Logging — JSON structured output for production log aggregation
+# ===================================================================
+logging:
+  level:
+    root: INFO
+    com.luna.aggarly: INFO
+    org.hibernate.SQL: WARN
+    org.springframework.web: INFO

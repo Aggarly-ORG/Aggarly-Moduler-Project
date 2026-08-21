@@ -1,0 +1,24 @@
+name: 📋 Task / Refactor
+description: Plan a specific development task, refactor, or optimization
+title: "[TASK]: "
+labels: ["task", "refactor"]
+body:
+  - type: textarea
+    id: overview
+    attributes:
+      label: Task Overview
+      description: What needs to be done?
+    validations:
+      required: true
+  - type: textarea
+    id: checklist
+    attributes:
+      label: Acceptance Criteria / Checklist
+      description: List the items that must be completed to close this task.
+      value: |
+        - [ ] Implementation completed
+        - [ ] Unit & integration tests added
+        - [ ] Swagger API docs updated
+        - [ ] `mvn test` passes cleanly
+    validations:
+      required: true

@@ -1,0 +1,105 @@
+# ===================================================================
+# Aggarly — Development Profile
+# ===================================================================
+
+spring:
+  # ========================
+  # Dev Security User Credentials
+  # ========================
+  security:
+    user:
+      name: admin
+      password: adminpassword
+
+  # ========================
+  # DataSource (PostgreSQL via Docker Compose)
+  # ========================
+  datasource:
+    url: jdbc:postgresql://localhost:5432/aggarly_db
+    username: aggarly
+    password: aggarly_secret
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: AggarlyCorePool
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  # ========================
+  # JPA — show SQL in dev
+  # ========================
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+  # ========================
+  # Redis
+  # ========================
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: aggarly_redis_secret
+      timeout: 6000ms
+
+  # ========================
+  # Mail (Mailhog — catches all emails locally)
+  # ========================
+  mail:
+    host: localhost
+    port: 1025
+    username: ""
+    password: ""
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+
+  # ========================
+  # Docker Compose integration
+  # ========================
+  docker:
+    compose:
+      enabled: true
+      lifecycle-management: start-only
+
+  # ========================
+  # Flyway
+  # ========================
+  flyway:
+    clean-disabled: false  # Allow clean in dev (NEVER in prod)
+
+  ai:
+    ollama:
+      base-url: http://localhost:11434
+      chat:
+        model: gemma4:31b-cloud
+        options:
+          temperature: 0.1
+          num-ctx: 131072
+      embedding:
+        model: nomic-embed-text
+
+# ===================================================================
+# Logging — verbose in dev
+# ===================================================================
+logging:
+  level:
+    com.luna.aggarly: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.orm.jdbc.bind: TRACE
+    org.springframework.web: DEBUG
+
+# ===================================================================
+# AI Engine — Ollama
+# ===================================================================
+aggarly:
+  ai:
+    provider: ollama
+    planning-model: nemotron-3-super:cloud

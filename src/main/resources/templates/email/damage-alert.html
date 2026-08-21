@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Urgent: Issue Reported — Aggarly</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #fef2f2; color: #991b1b; margin: 0; padding: 24px; }
+        .card { max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); border-left: 6px solid #ef4444; }
+        .header { margin-bottom: 24px; }
+        .brand { font-size: 24px; font-weight: 700; color: #ef4444; }
+        .title { font-size: 20px; font-weight: 600; margin-top: 12px; color: #1e293b; }
+        .details { background: #fff1f2; border-radius: 8px; padding: 16px; margin: 20px 0; color: #334155; }
+        .footer { font-size: 12px; color: #94a3b8; text-align: center; margin-top: 24px; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="header">
+        <div class="brand">Aggarly Incident Alert</div>
+        <div class="title">⚠️ Maintenance / Damage Reported</div>
+    </div>
+    <p>Hi <span th:text="${recipientName}">Host</span>,</p>
+    <p>An issue was reported during property inspection: <strong th:text="${title}">Broken Item</strong></p>
+
+    <div class="details">
+        <p><strong>Severity:</strong> <span th:text="${severity}">HIGH</span></p>
+        <p><strong>Description:</strong> <span th:text="${description}">Description of the issue.</span></p>
+    </div>
+
+    <div class="footer">
+        Please check your host portal to review photos and take action.
+    </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,36 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    database-platform: org.hibernate.dialect.H2Dialect
+  flyway:
+    enabled: false
+  mail:
+    host: localhost
+    port: 25
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+
+app:
+  jwt:
+    secret: aggarly-dev-secret-key-must-be-at-least-256-bits-long-for-hs256
+    access-token-expiration-ms: 900000
+    refresh-token-expiration-ms: 604800000
+  cors:
+    allowed-origins: http://localhost:3000
+    allowed-methods: GET,POST,PUT,DELETE
+    allowed-headers: "*"
+    allow-credentials: true
+  mail:
+    from: noreply@aggarly.com
+  oauth2:
+    frontend-redirect-url: http://localhost:3000/oauth2/callback
+    refresh-expiration-days: 7

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Payment Receipt — Aggarly</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b; margin: 0; padding: 24px; }
+        .card { max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+        .header { text-align: center; margin-bottom: 24px; }
+        .brand { font-size: 24px; font-weight: 700; color: #2563eb; }
+        .title { font-size: 20px; font-weight: 600; margin-top: 12px; }
+        .details { background: #f1f5f9; border-radius: 8px; padding: 16px; margin: 20px 0; }
+        .row { display: flex; justify-content: space-between; margin-bottom: 8px; }
+        .label { color: #64748b; }
+        .value { font-weight: 600; }
+        .footer { font-size: 12px; color: #94a3b8; text-align: center; margin-top: 24px; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="header">
+        <div class="brand">Aggarly</div>
+        <div class="title">Payment Receipt 💳</div>
+    </div>
+    <p>Hi <span th:text="${recipientName}">User</span>,</p>
+    <p>Your payment of <strong th:text="${amount}">$100.00</strong> was processed successfully.</p>
+
+    <div class="details">
+        <div class="row">
+            <span class="label">Transaction ID:</span>
+            <span class="value" th:text="${paymentId}">#tx_12345</span>
+        </div>
+        <div class="row">
+            <span class="label">Payment Method:</span>
+            <span class="value" th:text="${paymentMethod}">Credit Card</span>
+        </div>
+        <div class="row">
+            <span class="label">Date:</span>
+            <span class="value" th:text="${paymentDate}">2026-08-14</span>
+        </div>
+    </div>
+
+    <div class="footer">
+        Aggarly Platform • All rights reserved
+    </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Aggarly Real-Time WebSocket & Notification Tester</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
+        .container { max-width: 950px; margin: 0 auto; }
+        .card { background: #1e293b; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border: 1px solid #334155; }
+        h1, h2, h3 { margin-top: 0; color: #38bdf8; }
+        label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #94a3b8; }
+        input, textarea { width: 100%; box-sizing: border-box; background: #0f172a; border: 1px solid #475569; color: #f8fafc; padding: 10px; border-radius: 6px; margin-bottom: 14px; font-family: monospace; }
+        .row { display: flex; gap: 16px; }
+        .col { flex: 1; }
+        button { background: #2563eb; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s; font-size: 13px; }
+        button:hover { background: #1d4ed8; }
+        button.secondary { background: #475569; }
+        button.secondary:hover { background: #334155; }
+        button.new-btn { background: #10b981; }
+        button.new-btn:hover { background: #059669; }
+        button.disconnect { background: #ef4444; }
+        button.disconnect:hover { background: #dc2626; }
+        .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+        .status-disconnected { background: #7f1d1d; color: #fca5a5; }
+        .status-connected { background: #14532d; color: #86efac; }
+        .log-box { background: #020617; border-radius: 8px; padding: 16px; height: 350px; overflow-y: auto; font-family: monospace; font-size: 13px; border: 1px solid #1e293b; }
+        .log-entry { margin-bottom: 10px; padding: 10px; border-radius: 6px; border-left: 4px solid #38bdf8; background: #0f172a; }
+        .log-entry.notif { border-left-color: #f59e0b; }
+        .log-entry.chat { border-left-color: #10b981; }
+        .log-entry.typing { border-left-color: #a855f7; }
+        .time { color: #64748b; font-size: 11px; margin-bottom: 4px; }
+        .tip { font-size: 12px; color: #94a3b8; margin-top: -8px; margin-bottom: 12px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🚀 Aggarly WebSocket & Live Notification Tester</h1>
+
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="margin:0;">Connection Settings</h3>
+            <span id="statusBadge" class="status-badge status-disconnected">Disconnected</span>
+        </div>
+        <div class="row">
+            <div class="col">
+                <label>WebSocket Server URL (SockJS)</label>
+                <input id="serverUrl" type="text" value="http://localhost:8080/ws/chat" />
+            </div>
+            <div class="col">
+                <label>User UUID (for /queue/user.{id}.notifications)</label>
+                <input id="userId" type="text" placeholder="e.g. 11111111-1111-1111-1111-111111111111" />
+            </div>
+        </div>
+        <label>JWT Bearer Token</label>
+        <textarea id="jwtToken" rows="2" placeholder="eyJhbGciOi..."></textarea>
+        
+        <div style="display: flex; gap: 10px;">
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" class="disconnect" onclick="disconnect()" disabled>Disconnect</button>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col">
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <h3 style="margin:0;">💬 Send Chat Message</h3>
+                    <button class="new-btn" onclick="startBrandNewThread()" title="Create a brand new AI thread with new UUID">➕ Brand New Thread</button>
+                </div>
+                <label>Conversation ID (Zeroes = Re-use active AI thread, or enter specific ID)</label>
+                <input id="convId" type="text" value="00000000-0000-0000-0000-000000000000" />
+                <div class="tip">💡 <b>Zeroes UUID:</b> Continues/re-uses your current active AI conversation.<br/>💡 <b>➕ Brand New Thread:</b> Creates a fresh conversation with a brand new UUID!</div>
+                <label>Message Content</label>
+                <input id="msgContent" type="text" value="Find me top rated apartments in Paris" />
+                <div style="display: flex; gap: 8px;">
+                    <button onclick="sendChatMessage()">Send via WebSocket</button>
+                    <button class="secondary" onclick="subscribeToCurrentConv()">Subscribe to ID</button>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card">
+                <h3>⌨️ Send Typing Status</h3>
+                <label>Conversation ID</label>
+                <input id="typingConvId" type="text" placeholder="Conversation UUID" />
+                <div style="display: flex; gap: 10px; margin-top: 24px;">
+                    <button onclick="sendTyping(true)">Start Typing</button>
+                    <button onclick="sendTyping(false)" style="background: #64748b;">Stop Typing</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h3 style="margin:0;">📥 Live Incoming Stream (Notifications & Chat)</h3>
+            <button onclick="clearLogs()" style="padding: 6px 12px; font-size: 12px; background: #334155;">Clear Log</button>
+        </div>
+        <div id="logs" class="log-box"></div>
+    </div>
+</div>
+
+<script>
+    let stompClient = null;
+    const subscribedTopics = new Set();
+    const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
+
+    function log(msg, type = 'info') {
+        const logsDiv = document.getElementById('logs');
+        const entry = document.createElement('div');
+        entry.className = 'log-entry ' + type;
+        const now = new Date().toLocaleTimeString();
+        entry.innerHTML = `<div class="time">[${now}] [${type.toUpperCase()}]</div><div>${msg}</div>`;
+        logsDiv.prepend(entry);
+    }
+
+    function clearLogs() {
+        document.getElementById('logs').innerHTML = '';
+    }
+
+    function connect() {
+        const serverUrl = document.getElementById('serverUrl').value.trim();
+        const jwt = document.getElementById('jwtToken').value.trim();
+        const userId = document.getElementById('userId').value.trim();
+
+        if (!userId) {
+            alert('Please provide your User ID');
+            return;
+        }
+
+        log('Connecting to ' + serverUrl + ' ...');
+
+        stompClient = new StompJs.Client({
+            webSocketFactory: () => new SockJS(serverUrl),
+            connectHeaders: jwt ? { Authorization: 'Bearer ' + jwt } : {},
+            debug: function (str) {
+                console.log(str);
+            },
+            reconnectDelay: 5000,
+            heartbeatIncoming: 4000,
+            heartbeatOutgoing: 4000
+        });
+
+        stompClient.onConnect = function (frame) {
+            log('✅ Connected successfully over STOMP!', 'info');
+            document.getElementById('statusBadge').innerText = 'Connected';
+            document.getElementById('statusBadge').className = 'status-badge status-connected';
+            document.getElementById('connectBtn').disabled = true;
+            document.getElementById('disconnectBtn').disabled = false;
+
+            // 1. Subscribe to Personal In-App Notifications
+            const notifTopic = `/queue/user.${userId}.notifications`;
+            stompClient.subscribe(notifTopic, function (message) {
+                const notif = JSON.parse(message.body);
+                log(`🔔 <strong>NEW NOTIFICATION [${notif.category}]</strong>: <b>${notif.title}</b><br/>${notif.message}<br/><pre>${JSON.stringify(notif, null, 2)}</pre>`, 'notif');
+                
+                // If notification contains conversationId, auto-subscribe
+                if (notif.dataJson) {
+                    try {
+                        const data = JSON.parse(notif.dataJson);
+                        if (data.conversationId) {
+                            subscribeToConversation(data.conversationId);
+                        }
+                    } catch(e){}
+                }
+            });
+            log(`Subscribed to personal notification queue: <code>${notifTopic}</code>`);
+
+            // 2. Auto-subscribe to zeroes UUID broadcast channel
+            subscribeToConversation(ZERO_UUID);
+
+            const convId = document.getElementById('convId').value.trim();
+            if (convId && convId !== ZERO_UUID) {
+                subscribeToConversation(convId);
+            }
+        };
+
+        stompClient.onStompError = function (frame) {
+            const errorMsg = frame.headers['message'] || frame.body || 'Authentication failed';
+            log('❌ STOMP Error: ' + errorMsg, 'error');
+            // Deactivate client to stop automatic retry loop on authentication failures
+            if (stompClient) {
+                stompClient.deactivate();
+            }
+            document.getElementById('statusBadge').innerText = 'Error / Disconnected';
+            document.getElementById('statusBadge').className = 'status-badge status-disconnected';
+            document.getElementById('connectBtn').disabled = false;
+            document.getElementById('disconnectBtn').disabled = true;
+        };
+
+        stompClient.onWebSocketClose = function () {
+            log('WebSocket connection closed.');
+            document.getElementById('statusBadge').innerText = 'Disconnected';
+            document.getElementById('statusBadge').className = 'status-badge status-disconnected';
+            document.getElementById('connectBtn').disabled = false;
+            document.getElementById('disconnectBtn').disabled = true;
+            subscribedTopics.clear();
+        };
+
+        stompClient.activate();
+    }
+
+    function subscribeToConversation(convId) {
+        if (!stompClient || !stompClient.connected) return;
+        if (!convId) return;
+
+        const chatTopic = `/topic/conversation.${convId}`;
+        if (!subscribedTopics.has(chatTopic)) {
+            subscribedTopics.add(chatTopic);
+            stompClient.subscribe(chatTopic, function (message) {
+                const data = JSON.parse(message.body);
+                log(`💬 <strong>CHAT MESSAGE [Conv: ${data.conversationId}]</strong> from ${data.senderId}:<br/><b>${data.content}</b>`, 'chat');
+
+                // Auto update UI fields with real conversation ID
+                if (data.conversationId && data.conversationId !== ZERO_UUID) {
+                    document.getElementById('convId').value = data.conversationId;
+                    document.getElementById('typingConvId').value = data.conversationId;
+                    subscribeToConversation(data.conversationId);
+                }
+            });
+            log(`Subscribed to topic: <code>${chatTopic}</code>`);
+        }
+
+        const typingTopic = `/topic/conversation.${convId}.typing`;
+        if (!subscribedTopics.has(typingTopic)) {
+            subscribedTopics.add(typingTopic);
+            stompClient.subscribe(typingTopic, function (message) {
+                const data = JSON.parse(message.body);
+                log(`⌨️ User ${data.userId} is ${data.typing ? 'TYPING...' : 'idle'}`, 'typing');
+            });
+        }
+    }
+
+    function subscribeToCurrentConv() {
+        const convId = document.getElementById('convId').value.trim();
+        if (convId) {
+            subscribeToConversation(convId);
+        }
+    }
+
+    async function startBrandNewThread() {
+        const jwt = document.getElementById('jwtToken').value.trim();
+        if (!jwt) {
+            alert('Please enter your JWT Token in the connection settings first');
+            return;
+        }
+
+        try {
+            log('Creating a brand new AI conversation thread via REST...');
+            const response = await fetch('/api/v1/chat/conversations', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + jwt
+                },
+                body: JSON.stringify({
+                    type: 'AI_CONCIERGE',
+                    title: 'Aggarly AI Concierge ' + new Date().toLocaleTimeString(),
+                    initialMessage: 'New conversation started'
+                })
+            });
+
+            if (!response.ok) {
+                const err = await response.text();
+                log('❌ Failed to create new conversation: ' + err, 'error');
+                return;
+            }
+
+            const data = await response.json();
+            document.getElementById('convId').value = data.id;
+            document.getElementById('typingConvId').value = data.id;
+            subscribeToConversation(data.id);
+            log(`✨ <strong>BRAND NEW CONVERSATION CREATED!</strong> ID: <code>${data.id}</code>`, 'chat');
+
+        } catch (e) {
+            log('❌ Error creating new conversation: ' + e.message, 'error');
+        }
+    }
+
+    function disconnect() {
+        if (stompClient) {
+            stompClient.deactivate();
+            log('Disconnected by user.');
+        }
+    }
+
+    function sendChatMessage() {
+        if (!stompClient || !stompClient.connected) {
+            alert('Please connect first!');
+            return;
+        }
+        let convId = document.getElementById('convId').value.trim();
+        if (!convId) {
+            convId = ZERO_UUID;
+            document.getElementById('convId').value = ZERO_UUID;
+        }
+        const content = document.getElementById('msgContent').value.trim();
+        if (!content) {
+            alert('Please enter message content');
+            return;
+        }
+
+        stompClient.publish({
+            destination: '/app/chat.send',
+            body: JSON.stringify({
+                conversationId: convId,
+                content: content,
+                messageType: 'TEXT',
+                metadataJson: null
+            })
+        });
+        log(`Sent message to conversation: <code>${convId}</code>`);
+    }
+
+    function sendTyping(isTyping) {
+        if (!stompClient || !stompClient.connected) {
+            alert('Please connect first!');
+            return;
+        }
+        let convId = document.getElementById('typingConvId').value.trim();
+        if (!convId) {
+            convId = document.getElementById('convId').value.trim() || ZERO_UUID;
+        }
+
+        stompClient.publish({
+            destination: '/app/chat.typing',
+            body: JSON.stringify({
+                conversationId: convId,
+                isTyping: isTyping
+            })
+        });
+        log(`Sent typing=${isTyping} for conversation ${convId}`);
+    }
+</script>
+</body>
+</html>

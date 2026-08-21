@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aggarly — Google OAuth2 Login Successful</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: #090d16;
+            color: #f1f5f9;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .auth-card {
+            background: #131b2e;
+            border: 1px solid #1e293b;
+            border-radius: 16px;
+            max-width: 680px;
+            width: 100%;
+            padding: 32px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+        }
+        .header-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .badge-success {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        h1 {
+            font-size: 22px;
+            color: #ffffff;
+            margin-bottom: 6px;
+        }
+        p.subtitle {
+            color: #94a3b8;
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+        .token-group {
+            margin-bottom: 20px;
+        }
+        .token-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .token-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #cbd5e1;
+        }
+        .btn-copy {
+            background: #2563eb;
+            color: #ffffff;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .btn-copy:hover {
+            background: #1d4ed8;
+        }
+        .btn-copy.copied {
+            background: #10b981;
+        }
+        textarea {
+            width: 100%;
+            background: #0a0f1d;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            color: #38bdf8;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12px;
+            padding: 12px;
+            resize: none;
+            line-height: 1.4;
+            word-break: break-all;
+        }
+        .user-info-box {
+            background: #0a0f1d;
+            border: 1px solid #1e293b;
+            border-radius: 8px;
+            padding: 14px 16px;
+            margin-bottom: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-size: 13px;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            color: #94a3b8;
+        }
+        .info-value {
+            color: #f1f5f9;
+            font-weight: 500;
+            font-family: ui-monospace, monospace;
+        }
+        .actions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-top: 12px;
+        }
+        .action-link {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: #1e293b;
+            color: #f8fafc;
+            text-decoration: none;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            border: 1px solid #334155;
+            transition: background 0.2s;
+        }
+        .action-link:hover {
+            background: #334155;
+            color: #38bdf8;
+        }
+    </style>
+</head>
+<body>
+
+<div class="auth-card">
+    <div class="header-row">
+        <span class="badge-success">✓ Authenticated</span>
+    </div>
+    <h1>Google Login Successful</h1>
+    <p class="subtitle">Your tokens have been generated and securely saved. You can copy your token below or jump straight to testing.</p>
+
+    <!-- User Details from Token -->
+    <div id="userBox" class="user-info-box">
+        <div class="info-row">
+            <span>Email</span>
+            <span id="userEmail" class="info-value">Loading...</span>
+        </div>
+        <div class="info-row">
+            <span>User ID</span>
+            <span id="userId" class="info-value">Loading...</span>
+        </div>
+        <div class="info-row">
+            <span>Roles</span>
+            <span id="userRoles" class="info-value">Loading...</span>
+        </div>
+    </div>
+
+    <!-- JWT Access Token -->
+    <div class="token-group">
+        <div class="token-header">
+            <span class="token-label">JWT Access Token</span>
+            <button id="copyTokenBtn" class="btn-copy" onclick="copyText('tokenArea', 'copyTokenBtn')">📋 Copy JWT</button>
+        </div>
+        <textarea id="tokenArea" rows="4" readonly></textarea>
+    </div>
+
+    <!-- Refresh Token -->
+    <div class="token-group">
+        <div class="token-header">
+            <span class="token-label">Refresh Token</span>
+            <button id="copyRefreshBtn" class="btn-copy" onclick="copyText('refreshArea', 'copyRefreshBtn')">📋 Copy Refresh</button>
+        </div>
+        <textarea id="refreshArea" rows="1" readonly></textarea>
+    </div>
+
+    <!-- Quick Navigation Links -->
+    <div class="actions-grid">
+        <a href="/ws-test.html" class="action-link">🚀 Open Chat Tester</a>
+        <a href="/swagger-ui.html" class="action-link">📑 Open Swagger UI</a>
+        <a href="http://localhost:3000" class="action-link">🏠 Open Frontend</a>
+    </div>
+</div>
+
+<script>
+    function parseQuery() {
+        const params = new URLSearchParams(window.location.search);
+        return {
+            token: params.get('token') || '',
+            refreshToken: params.get('refreshToken') || ''
+        };
+    }
+
+    function decodeJwt(token) {
+        try {
+            const base64Url = token.split('.')[1];
+            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+            }).join(''));
+            return JSON.parse(jsonPayload);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function init() {
+        const { token, refreshToken } = parseQuery();
+
+        if (token) {
+            document.getElementById('tokenArea').value = token;
+            try {
+                localStorage.setItem('aggarly_jwt_token', token);
+            } catch(e) {}
+
+            const payload = decodeJwt(token);
+            if (payload) {
+                document.getElementById('userEmail').innerText = payload.sub || 'N/A';
+                document.getElementById('userId').innerText = payload.userId || 'N/A';
+                document.getElementById('userRoles').innerText = Array.isArray(payload.roles) ? payload.roles.join(', ') : (payload.roles || 'GUEST');
+            }
+        } else {
+            document.getElementById('tokenArea').value = 'No token provided in URL parameters.';
+        }
+
+        if (refreshToken) {
+            document.getElementById('refreshArea').value = refreshToken;
+            try {
+                localStorage.setItem('aggarly_refresh_token', refreshToken);
+            } catch(e) {}
+        } else {
+            document.getElementById('refreshArea').value = 'No refresh token provided.';
+        }
+    }
+
+    function copyText(areaId, btnId) {
+        const textarea = document.getElementById(areaId);
+        textarea.select();
+        navigator.clipboard.writeText(textarea.value).then(() => {
+            const btn = document.getElementById(btnId);
+            const originalText = btn.innerText;
+            btn.innerText = '✓ Copied!';
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.innerText = originalText;
+                btn.classList.remove('copied');
+            }, 2000);
+        });
+    }
+
+    init();
+</script>
+
+</body>
+</html>
