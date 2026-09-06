@@ -48,6 +48,9 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
+      - name: Make Maven Wrapper Executable
+        run: chmod +x ./mvnw
+
       - name: Verify Dependencies & Compile
         run: ./mvnw clean compile -DskipTests
         env:
