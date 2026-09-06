@@ -95,14 +95,15 @@ class UserSessionControllerTest {
     @Test
     @DisplayName("GET /api/v1/users/me/sessions should return 200 with active session list")
     void getActiveSessions_ShouldReturn200() throws Exception {
-        UserSessionResponse session1 = new UserSessionResponse(
-                currentSessionId,
-                "Chrome on Windows 10/11",
-                "127.0.0.1",
-                "Localhost / Dev",
-                Instant.now(),
-                true
-        );
+        UserSessionResponse session1 = UserSessionResponse.builder()
+                .id(currentSessionId)
+                .deviceName("Chrome on Windows 10/11")
+                .ipAddress("127.0.0.1")
+                .location("Localhost / Dev")
+                .lastActiveAt(Instant.now())
+                .createdAt(Instant.now().minusSeconds(3600))
+                .isCurrent(true)
+                .build();
 
         when(userSessionService.getActiveSessions(eq(userId), eq(currentSessionId)))
                 .thenReturn(List.of(session1));
