@@ -51,7 +51,7 @@
 		<twelvemonkeys.version>3.11.0</twelvemonkeys.version>
 		<imgscalr.version>4.2</imgscalr.version>
 
-		<!-- Java 26 compatible Lombok -->
+		<!-- Java 17/21 Lombok -->
 		<lombok.version>1.18.46</lombok.version>
 
 		<!-- Maven Compiler -->

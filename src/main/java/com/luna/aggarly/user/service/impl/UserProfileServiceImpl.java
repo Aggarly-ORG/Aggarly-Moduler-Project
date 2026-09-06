@@ -15,6 +15,7 @@ import com.luna.aggarly.user.repository.RoleRepository;
 import com.luna.aggarly.user.repository.UserRepository;
 import com.luna.aggarly.user.service.OtpService;
 import com.luna.aggarly.user.service.UserProfileService;
+import com.luna.aggarly.user.service.UserSessionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -32,6 +33,7 @@ public class UserProfileServiceImpl implements UserProfileService {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final com.luna.aggarly.user.repository.RefreshTokenRepository refreshTokenRepository;
+    private final UserSessionService userSessionService;
     private final FileStorageService fileStorageService;
     private final PasswordEncoder passwordEncoder;
     private final OtpService otpService;
@@ -128,7 +130,7 @@ public class UserProfileServiceImpl implements UserProfileService {
         }
 
         String otpCode = otpService.generatePhoneOtp(user.getId().toString());
-        log.info("📱 6-digit OTP sent to phone {} for user {}: {}", user.getPhone(), user.getEmail(), otpCode);
+        log.info("📱 6-digit OTP sent to phone {} for user {}", user.getPhone(), user.getEmail());
     }
 
     @Override
@@ -175,7 +177,9 @@ public class UserProfileServiceImpl implements UserProfileService {
         User user = findUserById(userId);
         user.setDeleted(true);
         userRepository.save(user);
-        log.info("Account deactivated (soft-deleted) for user: {}", user.getEmail());
+        refreshTokenRepository.revokeAllUserTokens(user);
+        userSessionService.revokeAllSessions(userId);
+        log.info("Account deactivated (soft-deleted) and sessions revoked for user: {}", user.getEmail());
     }
 
     private User findUserById(UUID userId) {

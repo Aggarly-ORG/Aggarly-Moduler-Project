@@ -1,14 +1,7 @@
 package com.luna.aggarly.user.controller;
 
 import com.luna.aggarly.common.dto.ApiResponse;
-import com.luna.aggarly.user.dto.request.ConfirmMfaRequest;
-import com.luna.aggarly.user.dto.request.ForgotPasswordRequest;
-import com.luna.aggarly.user.dto.request.LoginRequest;
-import com.luna.aggarly.user.dto.request.RefreshTokenRequest;
-import com.luna.aggarly.user.dto.request.RegisterRequest;
-import com.luna.aggarly.user.dto.request.ResetPasswordRequest;
-import com.luna.aggarly.user.dto.request.TotpRequest;
-import com.luna.aggarly.user.dto.request.VerifyEmailRequest;
+import com.luna.aggarly.user.dto.request.*;
 import com.luna.aggarly.user.dto.response.AuthResponse;
 import com.luna.aggarly.user.dto.response.RequestMfaResponse;
 import com.luna.aggarly.user.service.AuthService;
@@ -55,8 +48,8 @@ public class AuthController {
 
     @PostMapping("/logout")
     @Operation(summary = "Invalidate active session refresh token")
-    public ResponseEntity<ApiResponse<Void>> logout(@RequestParam("refreshToken") String refreshToken) {
-        authService.logout(refreshToken);
+    public ResponseEntity<ApiResponse<Void>> logout(@Valid @RequestBody LogoutRequest request) {
+        authService.logout(request.refreshToken());
         return ApiResponse.<Void>empty("Logged out successfully").toResponseEntity();
     }
 

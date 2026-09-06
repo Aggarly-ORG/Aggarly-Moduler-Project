@@ -14,17 +14,13 @@ import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.*;
 
+@Slf4j
 @Component
 public class HostAgent implements Agent {
-
-    private static final Logger log = LoggerFactory.getLogger(HostAgent.class);
     private static final int MAX_AGENT_TURNS = 6;
 
     private static final String HOST_AGENT_SYSTEM_PROMPT = """
@@ -418,6 +414,17 @@ public class HostAgent implements Agent {
            - Purpose: Login and OAuth2 callback authentication.
 
         ================================================================
+        RUNTIME EXPRESSION INJECTION & DYNAMIC FUNCTIONS
+        ================================================================
+        When invoking tools, you have access to Aggarly's Runtime Expression Engine.
+        All tool arguments are dynamically pre-evaluated through the expression engine before execution!
+        You can use:
+        - Root Object & Context: {{obj.<field>}}, {{user.id}}, {{current_conversation()}}, {{origin_channel()}}
+        - Date Functions: {{today()}}, {{now()}}, {{date_add(today(), 3, 'DAYS')}}, {{date_sub(today(), 1, 'MONTHS')}}, {{format_date(today(), 'yyyy-MM-dd')}}
+        - Entity Lookups: {{property('<id>').title}}, {{booking('<id>').status}}, {{user('<id>').email}}
+        - String & Math Utilities: {{upper(str)}}, {{format_currency(amount, 'USD')}}, {{join(list, ', ')}}, {{first(list)}}, {{coalesce(a, b)}}, {{ternary(cond, trueVal, falseVal)}}
+
+        ================================================================
         FAILURE HANDLING
         ================================================================
 
@@ -432,6 +439,7 @@ public class HostAgent implements Agent {
     private final ConfirmationGate confirmationGate;
     private final ObjectMapper objectMapper;
     private final Validator validator;
+    private final com.luna.aggarly.common.expression.ExpressionEngine expressionEngine;
 
     private final Map<String, Tool<?, ?>> toolRegistry = new HashMap<>();
 
@@ -443,12 +451,16 @@ public class HostAgent implements Agent {
             "host.createPricingRule",
             "host.calendarBlock",
             "host.optimize",
+            "cleaning.tasks",
             "review.generateHostResponse",
             "messaging.summary",
             "messaging.generateReply",
             "messaging.translate",
-            "messaging.grammar"
+            "messaging.grammar",
+            "messaging.readConversation"
     );
+
+    private final com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher activityPublisher;
 
     @Autowired
     public HostAgent(
@@ -456,17 +468,24 @@ public class HostAgent implements Agent {
             ConfirmationGate confirmationGate,
             ObjectMapper objectMapper,
             Validator validator,
-            List<Tool<?, ?>> tools
+            @Autowired(required = false) com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher activityPublisher,
+            @Autowired(required = false) com.luna.aggarly.common.expression.ExpressionEngine expressionEngine,
+            @Qualifier("toolRegistry") Map<String, Tool<?, ?>> sharedToolRegistry
     ) {
         this.llmClient = llmClient;
         this.confirmationGate = confirmationGate;
         this.objectMapper = objectMapper;
         this.validator = validator;
+        this.activityPublisher = activityPublisher;
+        this.expressionEngine = expressionEngine;
 
-        if (tools != null) {
-            for (Tool<?, ?> tool : tools) {
-                if (SUPPORTED_TOOLS.contains(tool.name())) {
-                    toolRegistry.put(tool.name(), tool);
+        if (sharedToolRegistry != null) {
+            for (String toolName : SUPPORTED_TOOLS) {
+                Tool<?, ?> tool = sharedToolRegistry.get(toolName);
+                if (tool != null) {
+                    toolRegistry.put(toolName, tool);
+                } else {
+                    log.warn("HostAgent: declared tool '{}' has no registered implementation", toolName);
                 }
             }
         }
@@ -505,9 +524,16 @@ public class HostAgent implements Agent {
         List<ToolDefinition> toolDefinitions = buildToolDefinitions();
         List<ChatMessage> messages = buildConversation(intent, context);
         List<String> executedTools = new ArrayList<>();
+        List<Map<String, Object>> executionSteps = new ArrayList<>();
+        long agentStartTime = System.currentTimeMillis();
+        UUID convId = context != null ? context.conversationId() : null;
 
         for (int turn = 1; turn <= MAX_AGENT_TURNS; turn++) {
             log.debug("HostAgent turn {}/{}", turn, MAX_AGENT_TURNS);
+            long turnStartTime = System.currentTimeMillis();
+            if (activityPublisher != null && convId != null) {
+                activityPublisher.publishTurnStart(convId, "HostAgent", turn, MAX_AGENT_TURNS, messages.size(), toolDefinitions.size());
+            }
 
             LlmToolCallResponse llmResponse;
             try {
@@ -517,16 +543,46 @@ public class HostAgent implements Agent {
                 return failureResponse("I couldn't process your request right now. Please try again.", executedTools);
             }
 
+            long turnDuration = System.currentTimeMillis() - turnStartTime;
+            if (activityPublisher != null && convId != null) {
+                List<String> proposedTools = llmResponse.hasToolCalls()
+                        ? llmResponse.toolCalls().stream().map(LlmToolCall::name).toList()
+                        : List.of();
+                activityPublisher.publishTurnEnd(convId, "HostAgent", turn, MAX_AGENT_TURNS, turnDuration, proposedTools);
+            }
+
             if (!llmResponse.hasToolCalls()) {
+                long synthStart = System.currentTimeMillis();
+                if (activityPublisher != null && convId != null) {
+                    activityPublisher.publishSynthesisStart(convId, "HostAgent");
+                }
                 String text = llmResponse.textResponse();
                 if (text == null || text.isBlank()) {
                     log.warn("HostAgent received empty final response on turn {}", turn);
                     return failureResponse("I wasn't able to generate a response. Please try again.", executedTools);
                 }
+
+                List<com.luna.aggarly.aiagent.engine.model.LumenResponseBlock> backendBlocks = new ArrayList<>();
+                if (!executionSteps.isEmpty()) {
+                    Map<String, Object> planData = new LinkedHashMap<>();
+                    planData.put("title", "Host Operations & Analysis Plan");
+                    planData.put("totalSteps", executionSteps.size());
+                    planData.put("totalDurationMs", System.currentTimeMillis() - agentStartTime);
+                    planData.put("steps", executionSteps);
+                    backendBlocks.add(0, com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.executionPlan(planData));
+                }
+
                 String formattedJson = com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.formatResponse(
                         text,
-                        null
+                        backendBlocks
                 );
+
+                if (activityPublisher != null && convId != null) {
+                    long synthDuration = System.currentTimeMillis() - synthStart;
+                    activityPublisher.publishSynthesisEnd(convId, "HostAgent", synthDuration, "Generated host management analysis & response");
+                    activityPublisher.publishCompleted(convId, "HostAgent", System.currentTimeMillis() - agentStartTime, executedTools.size(), turn);
+                }
+
                 return AgentResponse.builder()
                         .text(formattedJson)
                         .toolCalls(List.copyOf(executedTools))
@@ -545,10 +601,18 @@ public class HostAgent implements Agent {
                     continue;
                 }
 
+                if (activityPublisher != null && convId != null) {
+                    activityPublisher.publishToolStart(convId, "HostAgent", toolName, toolCall.arguments(), turn);
+                }
+                long toolStart = System.currentTimeMillis();
+
                 if (tool.requiresAuthentication() && user == null) {
                     log.warn("HostAgent: unauthenticated access attempted on tool '{}'", toolName);
                     messages.add(ChatMessage.toolResponse(toolName, buildErrorJson("AUTHENTICATION_REQUIRED",
                             "You must be signed in as a host to perform this operation.")));
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "HostAgent", toolName, System.currentTimeMillis() - toolStart, toolCall.arguments(), "Authentication required", false, turn);
+                    }
                     continue;
                 }
 
@@ -560,17 +624,37 @@ public class HostAgent implements Agent {
                             toolName, toolCall.arguments(), "host", List.copyOf(messages));
                     String token = confirmationGate.registerPendingConfirmation(user.getUserId(), toolName, state);
                     log.info("HostAgent: confirmation required — tool={}, token={}, user={}", toolName, token, user.getUserId());
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "HostAgent", toolName, System.currentTimeMillis() - toolStart, toolCall.arguments(), "Awaiting host confirmation", true, turn);
+                    }
                     return AgentResponse.awaitingConfirmation(
                             buildConfirmationMessage(toolName), token, toolName, List.copyOf(executedTools));
                 }
 
                 Object typedParameters;
                 try {
-                    typedParameters = objectMapper.convertValue(toolCall.arguments(), tool.parameterType());
+                    Object rawArgs = toolCall.arguments();
+                    if (expressionEngine != null && rawArgs != null) {
+                        com.luna.aggarly.scheduler.workflow.ExecutionContext exprCtx =
+                                com.luna.aggarly.scheduler.workflow.ExecutionContext.forTask(
+                                        user != null ? user.getUserId() : null,
+                                        null,
+                                        null,
+                                        "UTC"
+                                );
+                        if (convId != null) {
+                            exprCtx.variables().put("conversationId", convId.toString());
+                        }
+                        rawArgs = expressionEngine.resolve(rawArgs, exprCtx);
+                    }
+                    typedParameters = objectMapper.convertValue(rawArgs, tool.parameterType());
                 } catch (IllegalArgumentException ex) {
                     log.warn("HostAgent: invalid arguments for tool '{}': {}", toolName, ex.getMessage());
                     messages.add(ChatMessage.toolResponse(toolName, buildErrorJson("INVALID_ARGUMENTS",
                             "The arguments provided for '" + toolName + "' are malformed or missing required fields.")));
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "HostAgent", toolName, System.currentTimeMillis() - toolStart, toolCall.arguments(), "Invalid arguments", false, turn);
+                    }
                     continue;
                 }
 
@@ -583,6 +667,9 @@ public class HostAgent implements Agent {
                             .orElse("Invalid arguments.");
                     log.warn("HostAgent: validation failed for '{}': {}", toolName, detail);
                     messages.add(ChatMessage.toolResponse(toolName, buildErrorJson("VALIDATION_FAILED", detail)));
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "HostAgent", toolName, System.currentTimeMillis() - toolStart, toolCall.arguments(), detail, false, turn);
+                    }
                     continue;
                 }
 
@@ -595,11 +682,30 @@ public class HostAgent implements Agent {
                     ToolResult<Object> result = executableTool.execute(typedParameters, user);
 
                     executedTools.add(toolName);
+                    long duration = System.currentTimeMillis() - toolStart;
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "HostAgent", toolName, duration, toolCall.arguments(), result.getData(), result.isSuccess(), turn);
+                    }
+
+                    Map<String, Object> step = new LinkedHashMap<>();
+                    step.put("stepNumber", executionSteps.size() + 1);
+                    step.put("agentName", "HostAgent");
+                    step.put("toolName", toolName);
+                    step.put("status", result.isSuccess() ? "COMPLETED" : "FAILED");
+                    step.put("durationMs", duration);
+                    step.put("input", toolCall.arguments());
+                    step.put("summary", result.isSuccess() ? "Executed " + toolName + " successfully" : "Execution failed");
+                    executionSteps.add(step);
+
                     messages.add(ChatMessage.assistant(buildToolCallJson(toolCall)));
                     messages.add(ChatMessage.toolResponse(toolName, serializeResult(result)));
 
                 } catch (Exception ex) {
                     log.error("HostAgent: tool '{}' threw an exception on turn {}", toolName, turn, ex);
+                    long duration = System.currentTimeMillis() - toolStart;
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "HostAgent", toolName, duration, toolCall.arguments(), ex.getMessage(), false, turn);
+                    }
                     messages.add(ChatMessage.toolResponse(toolName, buildErrorJson("TOOL_EXECUTION_FAILED",
                             "The operation could not be completed. Please try again.")));
                 }
@@ -610,8 +716,8 @@ public class HostAgent implements Agent {
         return failureResponse("I was unable to complete your request safely. Please try rephrasing.", executedTools);
     }
 
-    public AgentResponse resumeFromConfirmation(PendingConfirmationState state, UserPrincipal ignoredUser) {
-        UserPrincipal user = SecurityUtils.getCurrentUserPrincipal();
+    public AgentResponse resumeFromConfirmation(PendingConfirmationState state, UserPrincipal callerUser) {
+        UserPrincipal user = callerUser != null ? callerUser : SecurityUtils.getCurrentUserPrincipal();
 
         Objects.requireNonNull(state, "state must not be null");
         log.info("HostAgent resuming from confirmation: tool={}, user={}", state.toolName(),

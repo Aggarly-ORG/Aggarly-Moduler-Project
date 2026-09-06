@@ -10,7 +10,11 @@ import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
-public class VerificationHelpTool implements Tool<UUID, String> {
+public class VerificationHelpTool implements Tool<VerificationHelpTool.Params, String> {
+
+    public record Params(
+            UUID userId
+    ) {}
 
     @Override
     public String name() {
@@ -23,8 +27,8 @@ public class VerificationHelpTool implements Tool<UUID, String> {
     }
 
     @Override
-    public Class<UUID> parameterType() {
-        return UUID.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -33,7 +37,7 @@ public class VerificationHelpTool implements Tool<UUID, String> {
     }
 
     @Override
-    public ToolResult<String> execute(UUID userId, UserPrincipal user) {
+    public ToolResult<String> execute(Params params, UserPrincipal user) {
         return ToolResult.ok("Identity Verification Steps: 1. Go to Account Settings > Verification. 2. Upload a government-issued photo ID. Verification completes in 5-10 minutes.");
     }
 }

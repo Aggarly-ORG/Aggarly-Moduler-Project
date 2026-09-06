@@ -16,17 +16,17 @@ import com.luna.aggarly.common.security.SecurityUtils;
 import com.luna.aggarly.user.security.UserPrincipal;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
 
+@Slf4j
 @Component
 public class PropertyAgent implements Agent {
 
-    private static final Logger log = LoggerFactory.getLogger(PropertyAgent.class);
     private static final int MAX_AGENT_TURNS = 6;
 
     private static final String PROPERTY_AGENT_SYSTEM_PROMPT = """
@@ -125,7 +125,7 @@ public class PropertyAgent implements Agent {
 
         When the user asks about specific property details, rules, photos, or amenities:
         
-        1. You MUST ALWAYS invoke the "property.details" tool with the propertyId UUID.
+        1. You MUST ALWAYS invoke the "property.info" tool with the propertyId UUID (include the DETAILS section, plus AMENITIES/RULES/LOCATION/HOST when relevant to the question).
         2. NEVER reply from memory or fabricate details, prices, cancellation policies, or image arrays.
         3. The backend tool will return the true image URLs, amenities, and policies.
 
@@ -388,6 +388,17 @@ public class PropertyAgent implements Agent {
            - Purpose: Login and OAuth2 callback authentication.
 
         ================================================================
+        RUNTIME EXPRESSION INJECTION & DYNAMIC FUNCTIONS
+        ================================================================
+        When invoking tools, you have access to Aggarly's Runtime Expression Engine.
+        All tool arguments are dynamically pre-evaluated through the expression engine before execution!
+        You can use:
+        - Root Object & Context: {{obj.<field>}}, {{user.id}}, {{current_conversation()}}, {{origin_channel()}}
+        - Date Functions: {{today()}}, {{now()}}, {{date_add(today(), 3, 'DAYS')}}, {{date_sub(today(), 1, 'MONTHS')}}, {{format_date(today(), 'yyyy-MM-dd')}}
+        - Entity Lookups: {{property('<id>').title}}, {{booking('<id>').status}}, {{user('<id>').email}}
+        - String & Math Utilities: {{upper(str)}}, {{format_currency(amount, 'USD')}}, {{join(list, ', ')}}, {{first(list)}}, {{coalesce(a, b)}}, {{ternary(cond, trueVal, falseVal)}}
+
+        ================================================================
         ABSOLUTE RULE
         ================================================================
 
@@ -403,6 +414,8 @@ public class PropertyAgent implements Agent {
     private final ObjectMapper objectMapper;
     private final Validator validator;
     private final PropertyService propertyService;
+    private final com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher activityPublisher;
+    private final com.luna.aggarly.common.expression.ExpressionEngine expressionEngine;
     private final Map<String, Tool<?, ?>> toolRegistry = new HashMap<>();
 
     @Autowired
@@ -412,18 +425,25 @@ public class PropertyAgent implements Agent {
             ObjectMapper objectMapper,
             Validator validator,
             @Autowired(required = false) PropertyService propertyService,
-            List<Tool<?, ?>> tools
+            @Autowired(required = false) com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher activityPublisher,
+            @Autowired(required = false) com.luna.aggarly.common.expression.ExpressionEngine expressionEngine,
+            @Qualifier("toolRegistry") Map<String, Tool<?, ?>> sharedToolRegistry
     ) {
         this.llmClient = llmClient;
         this.confirmationGate = confirmationGate;
         this.objectMapper = objectMapper;
         this.validator = validator;
         this.propertyService = propertyService;
+        this.activityPublisher = activityPublisher;
+        this.expressionEngine = expressionEngine;
 
-        if (tools != null) {
-            for (Tool<?, ?> tool : tools) {
-                if (SUPPORTED_TOOLS.contains(tool.name())) {
-                    this.toolRegistry.put(tool.name(), tool);
+        if (sharedToolRegistry != null) {
+            for (String toolName : SUPPORTED_TOOLS) {
+                Tool<?, ?> tool = sharedToolRegistry.get(toolName);
+                if (tool != null) {
+                    this.toolRegistry.put(toolName, tool);
+                } else {
+                    log.warn("PropertyAgent: declared tool '{}' has no registered implementation", toolName);
                 }
             }
         }
@@ -437,23 +457,17 @@ public class PropertyAgent implements Agent {
 
     private static final Set<String> SUPPORTED_TOOLS = Set.of(
             "property.search",
-            "property.details",
+            "property.info",
             "property.compare",
-            "property.availability",
             "property.calendar",
-            "property.nearbyPlaces",
-            "property.amenities",
-            "property.hostInfo",
-            "property.locationMap",
-            "property.rules",
             "property.recommendation",
             "user.favorites",
             "user.preferences",
-            "image.similarProperties",
-            "image.vectorSearch",
-            "review.summary",
-            "review.categoryRatings",
-            "review.sentiment"
+            "user.wishlist.update",
+            "messaging.sendToHost",
+            "review.insights",
+            "messaging.readConversation",
+            "vision.getPhotoTour"
     );
 
     @Override
@@ -472,7 +486,6 @@ public class PropertyAgent implements Agent {
                 || category == IntentCategory.PROPERTY_QUESTION
                 || category == IntentCategory.PROPERTY_COMPARISON
                 || category == IntentCategory.AVAILABILITY_QUESTION
-                || category == IntentCategory.IMAGE_ANALYSIS
                 || category == IntentCategory.MEMORY_MANAGEMENT;
     }
 
@@ -501,9 +514,16 @@ public class PropertyAgent implements Agent {
         List<ChatMessage> messages = buildConversation(intent, context);
         List<String> executedTools = new ArrayList<>();
         Map<String, Object> metadataCollector = new HashMap<>();
+        List<Map<String, Object>> executionSteps = new ArrayList<>();
+        long agentStartTime = System.currentTimeMillis();
+        UUID convId = context != null ? context.conversationId() : null;
 
         for (int turn = 1; turn <= MAX_AGENT_TURNS; turn++) {
             log.debug("PropertyAgent turn {}/{}", turn, MAX_AGENT_TURNS);
+            long turnStartTime = System.currentTimeMillis();
+            if (activityPublisher != null && convId != null) {
+                activityPublisher.publishTurnStart(convId, "PropertyAgent", turn, MAX_AGENT_TURNS, messages.size(), toolDefinitions.size());
+            }
 
             LlmToolCallResponse llmResponse;
             try {
@@ -513,12 +533,39 @@ public class PropertyAgent implements Agent {
                 return failureResponse("I couldn't process your request right now.", executedTools);
             }
 
+            long turnDuration = System.currentTimeMillis() - turnStartTime;
+            if (activityPublisher != null && convId != null) {
+                List<String> proposedTools = llmResponse.hasToolCalls()
+                        ? llmResponse.toolCalls().stream().map(LlmToolCall::name).toList()
+                        : List.of();
+                activityPublisher.publishTurnEnd(convId, "PropertyAgent", turn, MAX_AGENT_TURNS, turnDuration, proposedTools);
+            }
+
             if (!llmResponse.hasToolCalls()) {
+                long synthStart = System.currentTimeMillis();
+                if (activityPublisher != null && convId != null) {
+                    activityPublisher.publishSynthesisStart(convId, "PropertyAgent");
+                }
                 String response = llmResponse.textResponse();
                 if (response == null || response.isBlank()) {
                     log.warn("PropertyAgent received empty final response");
                     return failureResponse("I couldn't complete your request.", executedTools);
                 }
+
+                List<com.luna.aggarly.aiagent.engine.model.LumenResponseBlock> backendBlocks = new ArrayList<>(
+                        com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.extractBlocksFromMetadata(metadataCollector)
+                );
+
+                if (!executionSteps.isEmpty()) {
+                    Map<String, Object> planData = new LinkedHashMap<>();
+                    planData.put("title", "Property Search & Analysis Plan");
+                    planData.put("totalSteps", executionSteps.size());
+                    planData.put("totalDurationMs", System.currentTimeMillis() - agentStartTime);
+                    planData.put("steps", executionSteps);
+                    backendBlocks.add(0, com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.executionPlan(planData));
+                    metadataCollector.put("executionPlan", executionSteps);
+                }
+
                 String metadataJson = null;
                 if (!metadataCollector.isEmpty()) {
                     try {
@@ -529,9 +576,16 @@ public class PropertyAgent implements Agent {
                 }
                 String formattedJson = com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.formatResponse(
                         response,
-                        com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.extractBlocksFromMetadata(metadataCollector)
+                        backendBlocks
                 );
                 formattedJson = enrichPropertyBlocks(formattedJson);
+
+                if (activityPublisher != null && convId != null) {
+                    long synthDuration = System.currentTimeMillis() - synthStart;
+                    activityPublisher.publishSynthesisEnd(convId, "PropertyAgent", synthDuration, "Generated formatted recommendations and interactive UI blocks");
+                    activityPublisher.publishCompleted(convId, "PropertyAgent", System.currentTimeMillis() - agentStartTime, executedTools.size(), turn);
+                }
+
                 return AgentResponse.builder()
                         .text(formattedJson)
                         .toolCalls(List.copyOf(executedTools))
@@ -540,7 +594,7 @@ public class PropertyAgent implements Agent {
             }
 
             for (LlmToolCall toolCall : llmResponse.toolCalls()) {
-                AgentResponse interruptResponse = executeSingleTool(toolCall, messages, executedTools, metadataCollector, user);
+                AgentResponse interruptResponse = executeSingleTool(toolCall, messages, executedTools, metadataCollector, executionSteps, user, context, turn);
                 if (interruptResponse != null) {
                     return interruptResponse;
                 }
@@ -551,8 +605,8 @@ public class PropertyAgent implements Agent {
         return failureResponse("I couldn't safely complete your property request. Please try again.", executedTools);
     }
 
-    public AgentResponse resumeFromConfirmation(PendingConfirmationState state, UserPrincipal ignoredUser) {
-        UserPrincipal user = SecurityUtils.getCurrentUserPrincipal();
+    public AgentResponse resumeFromConfirmation(PendingConfirmationState state, UserPrincipal callerUser) {
+        UserPrincipal user = callerUser != null ? callerUser : SecurityUtils.getCurrentUserPrincipal();
         Objects.requireNonNull(state, "state must not be null");
         log.info("PropertyAgent resuming from confirmation: tool={}, user={}",
                 state.toolName(), user != null ? user.getUserId() : "anonymous");
@@ -617,7 +671,7 @@ public class PropertyAgent implements Agent {
             }
 
             for (LlmToolCall toolCall : llmResponse.toolCalls()) {
-                AgentResponse inner = executeSingleTool(toolCall, messages, executedTools, metadataCollector, user);
+                AgentResponse inner = executeSingleTool(toolCall, messages, executedTools, metadataCollector, null, user, null, turn);
                 if (inner != null) return inner;
             }
         }
@@ -630,7 +684,10 @@ public class PropertyAgent implements Agent {
             List<ChatMessage> messages,
             List<String> executedTools,
             Map<String, Object> metadataCollector,
-            UserPrincipal user
+            List<Map<String, Object>> executionSteps,
+            UserPrincipal user,
+            ConversationContext context,
+            Integer turn
     ) {
         String toolName = toolCall.name();
         Tool<?, ?> tool = toolRegistry.get(toolName);
@@ -642,12 +699,21 @@ public class PropertyAgent implements Agent {
             return null;
         }
 
+        UUID convId = context != null ? context.conversationId() : null;
+        if (activityPublisher != null && convId != null) {
+            activityPublisher.publishToolStart(convId, "PropertyAgent", toolName, toolCall.arguments(), turn);
+        }
+        long start = System.currentTimeMillis();
+
         UUID userId = user != null ? user.getUserId() : SecurityUtils.getCurrentUserId();
 
         if (userId == null && tool.requiresAuthentication()) {
             log.warn("Unauthenticated user attempted tool '{}'", toolName);
             messages.add(ChatMessage.toolResponse(toolName,
                     createErrorJson("AUTHENTICATION_REQUIRED", "Authentication is required for this operation.")));
+            if (activityPublisher != null && convId != null) {
+                activityPublisher.publishToolEnd(convId, "PropertyAgent", toolName, System.currentTimeMillis() - start, toolCall.arguments(), "Authentication required", false, turn);
+            }
             return null;
         }
 
@@ -659,17 +725,37 @@ public class PropertyAgent implements Agent {
                     toolName, toolCall.arguments(), "property", List.copyOf(messages));
             String token = confirmationGate.registerPendingConfirmation(userId, toolName, state);
             log.info("Confirmation required: user={}, tool={}, token={}", userId, toolName, token);
+            if (activityPublisher != null && convId != null) {
+                activityPublisher.publishToolEnd(convId, "PropertyAgent", toolName, System.currentTimeMillis() - start, toolCall.arguments(), "Awaiting user confirmation", true, turn);
+            }
             return AgentResponse.awaitingConfirmation(
                     "This action requires your confirmation to proceed.", token, toolName, List.copyOf(executedTools));
         }
 
         Object typedParameters;
         try {
-            typedParameters = objectMapper.convertValue(toolCall.arguments(), tool.parameterType());
+            Object rawArgs = toolCall.arguments();
+            if (expressionEngine != null && rawArgs != null) {
+                com.luna.aggarly.scheduler.workflow.ExecutionContext exprCtx =
+                        com.luna.aggarly.scheduler.workflow.ExecutionContext.forTask(
+                                userId != null ? userId : (user != null ? user.getUserId() : null),
+                                null,
+                                null,
+                                "UTC"
+                        );
+                if (convId != null) {
+                    exprCtx.variables().put("conversationId", convId.toString());
+                }
+                rawArgs = expressionEngine.resolve(rawArgs, exprCtx);
+            }
+            typedParameters = objectMapper.convertValue(rawArgs, tool.parameterType());
         } catch (IllegalArgumentException ex) {
             log.warn("Invalid arguments for tool '{}': {}", toolName, ex.getMessage());
             messages.add(ChatMessage.toolResponse(toolName,
                     createErrorJson("INVALID_ARGUMENTS", "The supplied tool arguments are invalid.")));
+            if (activityPublisher != null && convId != null) {
+                activityPublisher.publishToolEnd(convId, "PropertyAgent", toolName, System.currentTimeMillis() - start, toolCall.arguments(), "Invalid arguments", false, turn);
+            }
             return null;
         }
 
@@ -682,6 +768,9 @@ public class PropertyAgent implements Agent {
                     .orElse("Invalid arguments.");
             log.warn("Validation failed for '{}': {}", toolName, validationMessage);
             messages.add(ChatMessage.toolResponse(toolName, createErrorJson("INVALID_ARGUMENTS", validationMessage)));
+            if (activityPublisher != null && convId != null) {
+                activityPublisher.publishToolEnd(convId, "PropertyAgent", toolName, System.currentTimeMillis() - start, toolCall.arguments(), validationMessage, false, turn);
+            }
             return null;
         }
 
@@ -692,13 +781,30 @@ public class PropertyAgent implements Agent {
             ToolResult<Object> result = executableTool.execute(typedParameters, user);
             executedTools.add(toolName);
 
+            long duration = System.currentTimeMillis() - start;
+            if (activityPublisher != null && convId != null) {
+                activityPublisher.publishToolEnd(convId, "PropertyAgent", toolName, duration, toolCall.arguments(), result.getData(), result.isSuccess(), turn);
+            }
+
+            if (executionSteps != null) {
+                Map<String, Object> step = new LinkedHashMap<>();
+                step.put("stepNumber", executionSteps.size() + 1);
+                step.put("agentName", "PropertyAgent");
+                step.put("toolName", toolName);
+                step.put("status", result.isSuccess() ? "COMPLETED" : "FAILED");
+                step.put("durationMs", duration);
+                step.put("input", toolCall.arguments());
+                step.put("summary", result.isSuccess() ? "Executed " + toolName + " successfully" : "Execution failed");
+                executionSteps.add(step);
+            }
+
             if (result.isSuccess() && result.getData() != null && metadataCollector != null) {
-                if (toolName.equals("property.search") || toolName.equals("property.recommendation") || toolName.equals("image.similarProperties") || toolName.equals("image.vectorSearch")) {
+                if (toolName.equals("property.search") || toolName.equals("property.recommendation")) {
                     metadataCollector.put("cardType", "PROPERTY_SEARCH");
                     Object data = result.getData();
-                    if (data instanceof com.luna.aggarly.aiagent.tool.property.record.PropertySearchToolResponse resp) {
+                    if (data instanceof com.luna.aggarly.aiagent.tool.property.PropertySearchTool.Response resp) {
                         metadataCollector.put("properties", resp.properties());
-                    } else if (data instanceof com.luna.aggarly.aiagent.tool.property.record.PropertyRecommendationResponse rec) {
+                    } else if (data instanceof com.luna.aggarly.aiagent.tool.property.RecommendationTool.Response rec) {
                         metadataCollector.put("properties", rec.recommendations());
                     } else if (data instanceof org.springframework.data.domain.Page<?> page) {
                         metadataCollector.put("properties", page.getContent());
@@ -707,13 +813,20 @@ public class PropertyAgent implements Agent {
                     } else {
                         metadataCollector.put("properties", List.of(data));
                     }
-                } else if (toolName.equals("property.details")) {
+                } else if (toolName.equals("property.info")) {
                     metadataCollector.put("cardType", "PROPERTY_DETAILS");
-                    metadataCollector.put("property", result.getData());
+                    if (result.getData() instanceof Map<?, ?> info && info.get("details") != null) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> enriched = new LinkedHashMap<>((Map<String, Object>) result.getData());
+                        enriched.put("id", info.get("propertyId"));
+                        metadataCollector.put("property", enriched);
+                    } else {
+                        metadataCollector.put("property", result.getData());
+                    }
                 } else if (toolName.equals("property.compare")) {
                     metadataCollector.put("cardType", "PROPERTY_COMPARE");
                     metadataCollector.put("compareData", result.getData());
-                } else if (toolName.equals("property.availability") || toolName.equals("property.calendar")) {
+                } else if (toolName.equals("property.calendar")) {
                     metadataCollector.put("cardType", "AVAILABILITY_CALENDAR");
                     metadataCollector.put("calendarData", result.getData());
                 }
@@ -723,6 +836,10 @@ public class PropertyAgent implements Agent {
             messages.add(ChatMessage.toolResponse(toolName, serializeToolResult(result)));
         } catch (Exception ex) {
             log.error("Tool '{}' failed", toolName, ex);
+            long duration = System.currentTimeMillis() - start;
+            if (activityPublisher != null && convId != null) {
+                activityPublisher.publishToolEnd(convId, "PropertyAgent", toolName, duration, toolCall.arguments(), ex.getMessage(), false, turn);
+            }
             messages.add(ChatMessage.toolResponse(toolName,
                     createErrorJson("TOOL_EXECUTION_FAILED", "The requested operation could not be completed.")));
         }

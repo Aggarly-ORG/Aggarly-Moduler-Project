@@ -10,9 +10,9 @@ import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
-public class WeatherTool implements Tool<WeatherTool.WeatherRequest, Map<String, Object>> {
+public class WeatherTool implements Tool<WeatherTool.Params, Map<String, Object>> {
 
-    public record WeatherRequest(
+    public record Params(
             String location,
             String dateRange
     ) {}
@@ -28,8 +28,8 @@ public class WeatherTool implements Tool<WeatherTool.WeatherRequest, Map<String,
     }
 
     @Override
-    public Class<WeatherRequest> parameterType() {
-        return WeatherRequest.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -38,9 +38,10 @@ public class WeatherTool implements Tool<WeatherTool.WeatherRequest, Map<String,
     }
 
     @Override
-    public ToolResult<Map<String, Object>> execute(WeatherRequest params, UserPrincipal user) {
+    public ToolResult<Map<String, Object>> execute(Params params, UserPrincipal user) {
+        String loc = (params != null && params.location() != null) ? params.location() : "City Center";
         return ToolResult.ok(Map.of(
-                "location", params.location(),
+                "location", loc,
                 "forecast", "Sunny, 24°C (75°F)",
                 "precipitationChance", "10%"
         ));

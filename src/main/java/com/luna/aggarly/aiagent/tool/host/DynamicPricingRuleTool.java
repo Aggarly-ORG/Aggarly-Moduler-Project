@@ -13,9 +13,9 @@ import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
-public class DynamicPricingRuleTool implements Tool<DynamicPricingRuleTool.CreateRuleParams, PricingRuleResponse> {
+public class DynamicPricingRuleTool implements Tool<DynamicPricingRuleTool.Params, PricingRuleResponse> {
 
-    public record CreateRuleParams(
+    public record Params(
             UUID propertyId,
             PricingRuleRequest request
     ) {}
@@ -33,8 +33,8 @@ public class DynamicPricingRuleTool implements Tool<DynamicPricingRuleTool.Creat
     }
 
     @Override
-    public Class<CreateRuleParams> parameterType() {
-        return CreateRuleParams.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -48,7 +48,7 @@ public class DynamicPricingRuleTool implements Tool<DynamicPricingRuleTool.Creat
     }
 
     @Override
-    public ToolResult<PricingRuleResponse> execute(CreateRuleParams params, UserPrincipal user) {
+    public ToolResult<PricingRuleResponse> execute(Params params, UserPrincipal user) {
         PricingRuleResponse response = pricingRuleService.createRule(params.propertyId(), params.request());
         return ToolResult.ok(response);
     }

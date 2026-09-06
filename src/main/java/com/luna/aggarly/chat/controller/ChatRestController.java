@@ -6,6 +6,7 @@ import com.luna.aggarly.chat.dto.response.ConversationResponse;
 import com.luna.aggarly.chat.dto.response.ConversationSummaryResponse;
 import com.luna.aggarly.chat.dto.response.MessageResponse;
 import com.luna.aggarly.chat.entity.enums.MessageType;
+import com.luna.aggarly.chat.service.ChatAiBridgeService;
 import com.luna.aggarly.chat.service.ConversationService;
 import com.luna.aggarly.chat.service.MessageService;
 import com.luna.aggarly.common.dto.ApiResponse;
@@ -19,6 +20,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -104,6 +106,23 @@ public class ChatRestController {
         return ApiResponse.created(response, "Message sent successfully").toResponseEntity();
     }
 
+    @PostMapping("/conversations/{id}/bot-messages")
+    @Operation(summary = "Persist AI Bot message into conversation thread", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<MessageResponse>> sendBotMessage(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID id,
+            @Valid @RequestBody SendRestMessageRequest request) {
+        conversationService.getConversationById(id, principal.getUserId());
+        MessageResponse response = messageService.sendMessage(
+                id,
+                ChatAiBridgeService.AI_BOT_SYSTEM_ID,
+                request.content(),
+                request.messageType() != null ? request.messageType() : MessageType.TEXT,
+                request.metadataJson()
+        );
+        return ApiResponse.created(response, "Bot message persisted successfully").toResponseEntity();
+    }
+
     @PatchMapping("/conversations/{id}/read")
     @Operation(summary = "Mark conversation as read", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<ApiResponse<Void>> markRead(
@@ -132,5 +151,14 @@ public class ChatRestController {
             @RequestParam boolean archived) {
         conversationService.archiveConversation(id, principal.getUserId(), archived);
         return ApiResponse.<Void>empty("Conversation archive setting updated").toResponseEntity();
+    }
+
+    @DeleteMapping("/conversations/{id}/messages")
+    @Operation(summary = "Clear all messages in a conversation thread", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<Void>> clearMessages(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID id) {
+        messageService.clearConversationMessages(id, principal.getUserId());
+        return ApiResponse.<Void>empty("Conversation messages cleared successfully").toResponseEntity();
     }
 }

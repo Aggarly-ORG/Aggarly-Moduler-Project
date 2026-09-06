@@ -10,7 +10,11 @@ import org.springframework.stereotype.Component;
 
 @Component
 @RequiredArgsConstructor
-public class HostEarningsTool implements Tool<String, EarningsSummaryResponse> {
+public class HostEarningsTool implements Tool<HostEarningsTool.Params, EarningsSummaryResponse> {
+
+    public record Params(
+            String currency
+    ) {}
 
     private final PaymentService paymentService;
 
@@ -25,8 +29,8 @@ public class HostEarningsTool implements Tool<String, EarningsSummaryResponse> {
     }
 
     @Override
-    public Class<String> parameterType() {
-        return String.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -40,8 +44,9 @@ public class HostEarningsTool implements Tool<String, EarningsSummaryResponse> {
     }
 
     @Override
-    public ToolResult<EarningsSummaryResponse> execute(String currency, UserPrincipal user) {
-        String targetCurrency = currency != null && !currency.isBlank() ? currency : "USD";
+    public ToolResult<EarningsSummaryResponse> execute(Params params, UserPrincipal user) {
+        String targetCurrency = (params != null && params.currency() != null && !params.currency().isBlank())
+                ? params.currency() : "USD";
         EarningsSummaryResponse summary = paymentService.getEarningsSummary(targetCurrency);
         return ToolResult.ok(summary);
     }

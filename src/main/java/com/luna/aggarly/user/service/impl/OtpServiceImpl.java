@@ -6,6 +6,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.Map;
@@ -85,17 +87,36 @@ public class OtpServiceImpl implements OtpService {
             return false;
         }
 
-        String storedOtp = null;
         try {
-            storedOtp = redisTemplate.opsForValue().get(key);
-            if (storedOtp != null) {
+            String storedOtp = redisTemplate.opsForValue().get(key);
+            if (storedOtp != null && constantTimeEquals(code, storedOtp)) {
                 redisTemplate.delete(key);
+                return true;
+            }
+            if (storedOtp != null) {
+                // Code did not match; keep OTP intact so user can correct typos within TTL
+                return false;
             }
         } catch (Exception e) {
             log.warn("⚠️ Redis unavailable, checking local memory store for OTP: {}", e.getMessage());
-            storedOtp = localMemoryStore.remove(key);
+            String storedOtp = localMemoryStore.get(key);
+            if (storedOtp != null && constantTimeEquals(code, storedOtp)) {
+                localMemoryStore.remove(key);
+                return true;
+            }
+            if (storedOtp != null) {
+                return false;
+            }
         }
 
-        return code.trim().equals(storedOtp);
+        return false;
+    }
+
+    private boolean constantTimeEquals(String a, String b) {
+        if (a == null || b == null) return false;
+        return MessageDigest.isEqual(
+                a.trim().getBytes(StandardCharsets.UTF_8),
+                b.trim().getBytes(StandardCharsets.UTF_8)
+        );
     }
 }

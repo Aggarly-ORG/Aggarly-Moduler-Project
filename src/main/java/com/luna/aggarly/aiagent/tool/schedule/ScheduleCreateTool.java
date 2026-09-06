@@ -1,29 +1,89 @@
 package com.luna.aggarly.aiagent.tool.schedule;
 
+import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.luna.aggarly.aiagent.schema.JsonSchemaService;
 import com.luna.aggarly.aiagent.tool.Tool;
 import com.luna.aggarly.aiagent.tool.ToolResult;
-import com.luna.aggarly.aiagent.tool.schedule.record.CreateScheduleParams;
-import com.luna.aggarly.aiagent.tool.schedule.record.CreateScheduleResponse;
 import com.luna.aggarly.scheduler.dto.CreateScheduledTaskRequest;
 import com.luna.aggarly.scheduler.dto.ScheduledTaskResponse;
 import com.luna.aggarly.scheduler.dto.plan.*;
 import com.luna.aggarly.scheduler.entity.enums.ExecutionType;
 import com.luna.aggarly.scheduler.entity.enums.TriggerType;
 import com.luna.aggarly.scheduler.service.ScheduledTaskService;
+import com.luna.aggarly.scheduler.workflow.WorkflowPlan;
 import com.luna.aggarly.user.security.UserPrincipal;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+import java.util.UUID;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class ScheduleCreateTool implements Tool<CreateScheduleParams, CreateScheduleResponse> {
+public class ScheduleCreateTool implements Tool<ScheduleCreateTool.Params, ScheduleCreateTool.Response> {
+
+    public record Params(
+            @NotBlank
+            @JsonPropertyDescription("Human-readable name of the scheduled automation.")
+            String name,
+
+            @JsonPropertyDescription("Optional description of what the automation does.")
+            String description,
+
+            @NotNull
+            @JsonPropertyDescription("How the task is triggered: ONCE, DAILY, WEEKLY, MONTHLY, INTERVAL, EVENT, EVENT_OFFSET.")
+            TriggerType triggerType,
+
+            @NotNull
+            @JsonPropertyDescription("How the workflow is executed. DETERMINISTIC is preferred whenever the workflow can be represented by registered operations.")
+            ExecutionType executionType,
+
+            @NotBlank
+            @JsonPropertyDescription("IANA timezone such as UTC, Europe/London, Africa/Cairo, America/New_York.")
+            String timezone,
+
+            @NotNull
+            @Valid
+            @JsonPropertyDescription("Configuration corresponding to the selected trigger type.")
+            TriggerConfig triggerConfig,
+
+            @NotNull
+            @Valid
+            @JsonPropertyDescription("Executable workflow plan.")
+            WorkflowPlan plan
+    ) {}
+
+    public record Response(
+            UUID taskId,
+            String name,
+            String status,
+            String triggerType,
+            String nextExecutionAt,
+            int stepsCount,
+            String summary
+    ) {
+        public static Response fromScheduledTask(ScheduledTaskResponse task, int stepsCount) {
+            String nextRun = task.nextExecutionAt() != null ? task.nextExecutionAt().toString() : "On Event";
+            String summary = String.format("Automation '%s' successfully scheduled with %d step(s). Next execution: %s.",
+                    task.name(), stepsCount, nextRun);
+            return new Response(
+                    task.id(),
+                    task.name(),
+                    task.status() != null ? task.status().name() : "ACTIVE",
+                    task.triggerType() != null ? task.triggerType().name() : "UNKNOWN",
+                    task.nextExecutionAt() != null ? task.nextExecutionAt().toString() : null,
+                    stepsCount,
+                    summary
+            );
+        }
+    }
 
     private final ScheduledTaskService scheduledTaskService;
     private final JsonSchemaService jsonSchemaService;
@@ -40,8 +100,8 @@ public class ScheduleCreateTool implements Tool<CreateScheduleParams, CreateSche
     }
 
     @Override
-    public Class<CreateScheduleParams> parameterType() {
-        return CreateScheduleParams.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -55,94 +115,97 @@ public class ScheduleCreateTool implements Tool<CreateScheduleParams, CreateSche
     }
 
     @Override
-    public ToolResult<CreateScheduleResponse> execute(CreateScheduleParams params, UserPrincipal user) {
+    public ToolResult<Response> execute(Params params, UserPrincipal user) {
         try {
             TriggerType triggerType = params.triggerType();
             TriggerConfig triggerConfig = params.triggerConfig();
+            validateTriggerConfig(triggerType, triggerConfig);
 
-            // Validate trigger type vs config coherence
-            validateTriggerCompatibility(triggerType, triggerConfig);
-
-            @SuppressWarnings("unchecked")
-            Map<String, Object> configMap = objectMapper.convertValue(triggerConfig, Map.class);
-            @SuppressWarnings("unchecked")
-            Map<String, Object> planMap = objectMapper.convertValue(params.plan(), Map.class);
+            Map<String, Object> triggerConfigMap = triggerConfig != null ? objectMapper.convertValue(triggerConfig, Map.class) : Map.of();
+            Map<String, Object> planMap = params.plan() != null ? objectMapper.convertValue(params.plan(), Map.class) : Map.of();
 
             CreateScheduledTaskRequest request = CreateScheduledTaskRequest.builder()
                     .name(params.name())
                     .description(params.description())
                     .triggerType(triggerType)
                     .executionType(params.executionType() != null ? params.executionType() : ExecutionType.DETERMINISTIC)
-                    .timezone(params.timezone() != null && !params.timezone().isBlank() ? params.timezone() : "UTC")
-                    .triggerConfig(configMap)
+                    .misfirePolicy(com.luna.aggarly.scheduler.entity.enums.MisfirePolicy.RUN_ONCE_NOW)
+                    .timezone(params.timezone() != null ? params.timezone() : "UTC")
+                    .triggerConfig(triggerConfigMap)
                     .plan(planMap)
+                    .maxRetries(3)
                     .build();
 
-            ScheduledTaskResponse response = scheduledTaskService.createTask(request, user);
+            ScheduledTaskResponse task = scheduledTaskService.createTask(request, user);
 
-            String nextRun;
-            if (response.nextExecutionAt() != null) {
-                nextRun = response.nextExecutionAt().toString();
-            } else if (triggerType == TriggerType.ONCE) {
-                if (triggerConfig instanceof OnceTriggerConfig onceConfig && onceConfig.executeAt() != null) {
-                    nextRun = onceConfig.executeAt().toString();
-                } else {
-                    nextRun = "One-time Execution";
-                }
-            } else if (triggerType == TriggerType.EVENT || triggerType == TriggerType.EVENT_OFFSET) {
-                String eventName = (triggerConfig instanceof EventTriggerConfig ec) ? ec.event()
-                        : ((triggerConfig instanceof EventOffsetTriggerConfig eoc) ? eoc.event() : "Application Event");
-                nextRun = "On Event: " + eventName;
-            } else {
-                nextRun = "Scheduled";
-            }
+            int stepsCount = (params.plan() != null && params.plan().steps() != null)
+                    ? params.plan().steps().size()
+                    : 0;
 
-            CreateScheduleResponse resp = new CreateScheduleResponse(
-                    response.id(),
-                    response.name(),
-                    response.status().name(),
-                    response.triggerType().name(),
-                    nextRun,
-                    String.format("Scheduled task '%s' created successfully.", response.name())
-            );
+            Response response = Response.fromScheduledTask(task, stepsCount);
+            return ToolResult.ok(response);
 
-            return ToolResult.ok(resp);
-        } catch (Exception ex) {
-            log.error("Failed to create schedule via tool", ex);
-            return ToolResult.failed("SCHEDULE_CREATION_FAILED", ex.getMessage());
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid schedule parameters: {}", e.getMessage());
+            return ToolResult.failed("INVALID_SCHEDULE_PARAMS", e.getMessage());
+        } catch (Exception e) {
+            log.error("Failed to create scheduled automation: {}", e.getMessage(), e);
+            return ToolResult.failed("SCHEDULE_CREATION_FAILED",
+                    "Failed to register scheduled automation: " + e.getMessage());
         }
     }
 
-    private void validateTriggerCompatibility(TriggerType type, TriggerConfig config) {
+    private void validateTriggerConfig(TriggerType type, TriggerConfig config) {
         if (type == null || config == null) {
-            return;
+            throw new IllegalArgumentException("Both triggerType and triggerConfig are required.");
         }
 
-        boolean valid = switch (type) {
-            case ONCE -> config instanceof OnceTriggerConfig;
-            case DAILY -> config instanceof DailyTriggerConfig;
-            case WEEKLY -> config instanceof WeeklyTriggerConfig;
-            case MONTHLY -> config instanceof MonthlyTriggerConfig;
-            case INTERVAL -> config instanceof IntervalTriggerConfig;
-            case EVENT -> config instanceof EventTriggerConfig;
-            case EVENT_OFFSET -> config instanceof EventOffsetTriggerConfig;
-        };
-
-        if (!valid) {
-            throw new IllegalArgumentException(String.format(
-                    "Mismatched trigger configuration: triggerType '%s' is not compatible with config class '%s'",
-                    type, config.getClass().getSimpleName()
-            ));
+        switch (type) {
+            case ONCE -> {
+                if (!(config instanceof OnceTriggerConfig)) {
+                    throw new IllegalArgumentException("ONCE trigger requires OnceTriggerConfig with 'executeAt'");
+                }
+            }
+            case DAILY -> {
+                if (!(config instanceof DailyTriggerConfig)) {
+                    throw new IllegalArgumentException("DAILY trigger requires DailyTriggerConfig with 'time'");
+                }
+            }
+            case WEEKLY -> {
+                if (!(config instanceof WeeklyTriggerConfig w) || w.days() == null || w.days().isEmpty()) {
+                    throw new IllegalArgumentException("WEEKLY trigger requires WeeklyTriggerConfig with non-empty 'days'");
+                }
+            }
+            case MONTHLY -> {
+                if (!(config instanceof MonthlyTriggerConfig m) || m.dayOfMonth() < 1 || m.dayOfMonth() > 31) {
+                    throw new IllegalArgumentException("MONTHLY trigger requires MonthlyTriggerConfig with dayOfMonth between 1 and 31");
+                }
+            }
+            case INTERVAL -> {
+                if (!(config instanceof IntervalTriggerConfig i) || i.every() <= 0 || i.unit() == null) {
+                    throw new IllegalArgumentException("INTERVAL trigger requires IntervalTriggerConfig with positive 'every' and valid 'unit'");
+                }
+            }
+            case EVENT -> {
+                if (!(config instanceof EventTriggerConfig e) || e.event() == null || e.event().isBlank()) {
+                    throw new IllegalArgumentException("EVENT trigger requires EventTriggerConfig with 'event' name");
+                }
+            }
+            case EVENT_OFFSET -> {
+                if (!(config instanceof EventOffsetTriggerConfig eo) || eo.event() == null || eo.offset() == null) {
+                    throw new IllegalArgumentException("EVENT_OFFSET trigger requires EventOffsetTriggerConfig with 'event' and 'offset'");
+                }
+            }
         }
     }
 
     @Override
     public JsonNode parameterSchema() {
-        return jsonSchemaService.generate(CreateScheduleParams.class);
+        return jsonSchemaService.generate(Params.class);
     }
 
     @Override
     public JsonNode responseSchema() {
-        return jsonSchemaService.generate(CreateScheduleResponse.class);
+        return jsonSchemaService.generate(Response.class);
     }
 }

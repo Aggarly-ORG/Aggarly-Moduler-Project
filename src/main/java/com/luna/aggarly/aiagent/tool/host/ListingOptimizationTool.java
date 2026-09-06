@@ -11,7 +11,11 @@ import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
-public class ListingOptimizationTool implements Tool<UUID, Map<String, String>> {
+public class ListingOptimizationTool implements Tool<ListingOptimizationTool.Params, Map<String, String>> {
+
+    public record Params(
+            UUID propertyId
+    ) {}
 
     @Override
     public String name() {
@@ -24,8 +28,8 @@ public class ListingOptimizationTool implements Tool<UUID, Map<String, String>> 
     }
 
     @Override
-    public Class<UUID> parameterType() {
-        return UUID.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -34,7 +38,7 @@ public class ListingOptimizationTool implements Tool<UUID, Map<String, String>> 
     }
 
     @Override
-    public ToolResult<Map<String, String>> execute(UUID propertyId, UserPrincipal user) {
+    public ToolResult<Map<String, String>> execute(Params params, UserPrincipal user) {
         return ToolResult.ok(Map.of(
                 "suggestedTitle", "Charming & Sunny City Center Apartment w/ Balcony",
                 "suggestedDescription", "Experience luxury living in the heart of the city with modern amenities and high-speed Wi-Fi.",

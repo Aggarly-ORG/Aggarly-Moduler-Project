@@ -1,0 +1,25 @@
+# Progress Log - User Service & Architecture Survey (Gen 3)
+
+- **Last visited**: 2026-09-05T11:37:15Z
+- **Current Status**: Complete. Survey report and handoff created.
+- **Tasks**:
+  - [x] Review dispatch instructions and original request
+  - [x] Initialize DISPATCH.md, BRIEFING.md, progress.md
+  - [x] Inspect service implementations in `com.luna.aggarly.user.service`:
+    - [x] `AuthServiceImpl`
+    - [x] `EmailServiceImpl`
+    - [x] `MfaServiceImpl`
+    - [x] `OtpServiceImpl`
+    - [x] `UserPaymentMethodServiceImpl`
+    - [x] `UserProfileServiceImpl`
+    - [x] `RefreshTokenCleanupService`
+  - [x] Audit Clean Code & Architecture (R2):
+    - [x] Transaction boundaries (`@Transactional`, readOnly, proxy bypass on private methods, network I/O overlap)
+    - [x] Separation of concerns (controllers vs services, direct repo injection in `UserController`, duplicate methods in `AuthService` vs `UserProfileService`)
+    - [x] Exception handling & sensitive info leakage (ProblemDetail, ApiResponse, stack traces, raw RuntimeExceptions)
+    - [x] Jakarta validation annotations on DTOs and controller parameters
+  - [x] Map cross-module interactions:
+    - [x] User references in payment (`PaymentMethod`), booking, notifications, chat, aiagent, common security
+  - [x] Synthesize findings into `survey_services_architecture.md`
+  - [x] Write 5-component `handoff.md`
+  - [x] Notify orchestrator via `send_message`

@@ -123,7 +123,7 @@ app:
     from: ${MAIL_FROM:noreply@aggarly.com}
 
   oauth2:
-    frontend-redirect-url: ${OAUTH2_REDIRECT_URL:http://localhost:8081/oauth2-success.html}
+    frontend-redirect-url: ${OAUTH2_REDIRECT_URL:http://localhost:3000/oauth2/callback}
     refresh-expiration-days: 7
 
 # ===================================================================
@@ -233,5 +233,10 @@ aggarly:
         - LIVING_ROOM
         - EXTERIOR
         - VIEW
+
+    # OpenCLIP Neural Embedding Service
+    clip-service:
+      url: ${CLIP_SERVICE_URL:http://localhost:8000}
+      timeout-ms: 5000
 
 

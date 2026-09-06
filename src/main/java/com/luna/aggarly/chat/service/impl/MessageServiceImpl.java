@@ -167,7 +167,9 @@ public class MessageServiceImpl implements MessageService {
         );
         boolean isAiConversation = conversation.getType() == ConversationType.AI_CONCIERGE;
 
-        if ((isAiConversation || isAiMentioned) && !senderId.equals(ChatAiBridgeService.AI_BOT_SYSTEM_ID)) {
+        boolean isImageOrSkip = messageType == MessageType.IMAGE || (metadataJson != null && metadataJson.contains("\"skipAiTurn\":true"));
+
+        if ((isAiConversation || isAiMentioned) && !senderId.equals(ChatAiBridgeService.AI_BOT_SYSTEM_ID) && !isImageOrSkip) {
             // If AI is mentioned in a direct conversation, ensure AI_BOT is a participant
             if (!participantRepository.existsByConversationIdAndUserId(finalConversationId, ChatAiBridgeService.AI_BOT_SYSTEM_ID)) {
                 ConversationParticipant aiParticipant = ConversationParticipant.builder()
@@ -240,6 +242,9 @@ public class MessageServiceImpl implements MessageService {
                 messageRepository.findMessagesBefore(finalConvId, before, PageRequest.of(0, max)));
     }
 
+    @Autowired(required = false)
+    private com.luna.aggarly.aiagent.repository.AiMessageRepository aiMessageRepository;
+
     @Override
     @Transactional
     public void recordReadReceipt(UUID messageId, UUID userId) {
@@ -252,6 +257,40 @@ public class MessageServiceImpl implements MessageService {
                         .build();
                 readReceiptRepository.save(receipt);
             });
+        }
+    }
+
+    @Override
+    @Transactional
+    public void clearConversationMessages(UUID conversationId, UUID currentUserId) {
+        if (isZeroOrNull(conversationId)) {
+            ConversationResponse convResp = conversationService.getOrCreateAiConciergeConversation(currentUserId);
+            conversationId = convResp.id();
+        }
+
+        final UUID finalConvId = conversationId;
+        Conversation conversation = conversationRepository.findById(finalConvId)
+                .orElseThrow(() -> new ConversationNotFoundException(finalConvId));
+
+        boolean isParticipant = conversation.getParticipants().stream()
+                .anyMatch(p -> p.getUserId().equals(currentUserId));
+
+        if (!isParticipant) {
+            throw new UnauthorizedChatAccessException("You are not authorized to clear messages in this conversation");
+        }
+
+        // Clean up only AI agent conversation context messages (keep human chat history intact)
+        if (aiMessageRepository != null) {
+            if (conversation.getAiConversationId() != null) {
+                var aiMessages = aiMessageRepository.findByConversationIdOrderByCreatedAtAsc(conversation.getAiConversationId());
+                if (!aiMessages.isEmpty()) {
+                    aiMessageRepository.deleteAll(aiMessages);
+                }
+            }
+            var directAiMessages = aiMessageRepository.findByConversationIdOrderByCreatedAtAsc(finalConvId);
+            if (!directAiMessages.isEmpty()) {
+                aiMessageRepository.deleteAll(directAiMessages);
+            }
         }
     }
 }

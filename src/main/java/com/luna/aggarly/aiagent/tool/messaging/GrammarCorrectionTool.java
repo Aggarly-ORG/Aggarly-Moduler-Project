@@ -8,7 +8,11 @@ import org.springframework.stereotype.Component;
 
 @Component
 @RequiredArgsConstructor
-public class GrammarCorrectionTool implements Tool<String, String> {
+public class GrammarCorrectionTool implements Tool<GrammarCorrectionTool.Params, String> {
+
+    public record Params(
+            String text
+    ) {}
 
     @Override
     public String name() {
@@ -21,8 +25,8 @@ public class GrammarCorrectionTool implements Tool<String, String> {
     }
 
     @Override
-    public Class<String> parameterType() {
-        return String.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -31,7 +35,8 @@ public class GrammarCorrectionTool implements Tool<String, String> {
     }
 
     @Override
-    public ToolResult<String> execute(String text, UserPrincipal user) {
+    public ToolResult<String> execute(Params params, UserPrincipal user) {
+        String text = (params != null && params.text() != null) ? params.text() : "";
         return ToolResult.ok(text);
     }
 }

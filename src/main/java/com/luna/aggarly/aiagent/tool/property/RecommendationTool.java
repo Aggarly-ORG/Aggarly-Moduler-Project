@@ -1,12 +1,10 @@
 package com.luna.aggarly.aiagent.tool.property;
 
+import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.luna.aggarly.aiagent.schema.JsonSchemaService;
 import com.luna.aggarly.aiagent.tool.Tool;
 import com.luna.aggarly.aiagent.tool.ToolResult;
-import com.luna.aggarly.aiagent.tool.property.record.PropertyRecommendationParams;
-import com.luna.aggarly.aiagent.tool.property.record.PropertyRecommendationResponse;
-import com.luna.aggarly.aiagent.tool.property.record.PropertySummaryItem;
 import com.luna.aggarly.property.dto.request.PropertySearchRequest;
 import com.luna.aggarly.property.dto.request.filters.CapacityFilter;
 import com.luna.aggarly.property.dto.request.filters.LocationFilter;
@@ -22,12 +20,53 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class RecommendationTool implements Tool<PropertyRecommendationParams, PropertyRecommendationResponse> {
+public class RecommendationTool implements Tool<RecommendationTool.Params, RecommendationTool.Response> {
+
+    public record Params(
+            @JsonPropertyDescription("Destination city, region, or area (e.g. 'Alexandria', 'Paris').")
+            String destination,
+
+            @JsonPropertyDescription("Number of guests requiring accommodation.")
+            Integer guests,
+
+            @JsonPropertyDescription("Target maximum nightly budget.")
+            BigDecimal budget,
+
+            @JsonPropertyDescription("Guest lifestyle intent or aesthetic preference (e.g. 'romantic', 'luxury', 'beachfront', 'workspace').")
+            String lifestyle,
+
+            @JsonPropertyDescription("Maximum number of recommendations to return (default 5).")
+            Integer limit
+    ) {}
+
+    public record Response(
+            List<Item> recommendations,
+            int count,
+            String lifestyleApplied,
+            String summary
+    ) {
+        public record Item(
+                UUID id,
+                String title,
+                String description,
+                String propertyType,
+                String city,
+                String country,
+                double basePrice,
+                int maxGuests,
+                double rating,
+                int reviewCount,
+                String coverPhotoUrl,
+                List<String> keyHighlights
+        ) {}
+    }
 
     private final PropertyService propertyService;
     private final JsonSchemaService jsonSchemaService;
@@ -43,8 +82,8 @@ public class RecommendationTool implements Tool<PropertyRecommendationParams, Pr
     }
 
     @Override
-    public Class<PropertyRecommendationParams> parameterType() {
-        return PropertyRecommendationParams.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -58,21 +97,24 @@ public class RecommendationTool implements Tool<PropertyRecommendationParams, Pr
     }
 
     @Override
-    public ToolResult<PropertyRecommendationResponse> execute(PropertyRecommendationParams params, UserPrincipal user) {
-        log.info("Executing property.recommendation: destination={}, guests={}, maxPrice={}",
-                params.destination(), params.guests(), params.maxPrice());
+    public ToolResult<Response> execute(Params params, UserPrincipal user) {
+        log.info("Executing property.recommendation: destination={}, guests={}, budget={}, lifestyle={}",
+                params.destination(), params.guests(), params.budget(), params.lifestyle());
 
-        LocationFilter locationFilter = params.destination() != null
-                ? new LocationFilter(params.destination(), null, null, null, null, null)
-                : null;
+        LocationFilter locationFilter = null;
+        if (params.destination() != null && !params.destination().isBlank()) {
+            locationFilter = new LocationFilter(params.destination().trim(), null, null, null, null, null);
+        }
 
-        CapacityFilter capacityFilter = params.guests() != null
-                ? new CapacityFilter(params.guests(), null, null, null)
-                : null;
+        PricingFilter pricingFilter = null;
+        if (params.budget() != null) {
+            pricingFilter = new PricingFilter(null, params.budget(), null);
+        }
 
-        PricingFilter pricingFilter = params.maxPrice() != null
-                ? new PricingFilter(null, params.maxPrice(), null)
-                : null;
+        CapacityFilter capacityFilter = null;
+        if (params.guests() != null && params.guests() > 0) {
+            capacityFilter = new CapacityFilter(params.guests(), null, null, null);
+        }
 
         PropertySearchRequest searchRequest = new PropertySearchRequest(
                 locationFilter,
@@ -100,72 +142,59 @@ public class RecommendationTool implements Tool<PropertyRecommendationParams, Pr
                 null
         );
 
-        Page<PropertyResponse> page = propertyService.searchProperties(
-                searchRequest,
-                PageRequest.of(0, 5, Sort.by(Sort.Direction.DESC, "avgRating"))
-        );
+        int limit = (params.limit() != null && params.limit() > 0) ? Math.min(params.limit(), 20) : 5;
+        Sort sort = Sort.by(Sort.Direction.DESC, "avgRating").and(Sort.by(Sort.Direction.DESC, "reviewCount"));
+        Page<PropertyResponse> page = propertyService.searchProperties(searchRequest, PageRequest.of(0, limit, sort));
 
-        List<PropertySummaryItem> items = page.getContent().stream()
-                .map(this::toSummaryItem)
+        List<Response.Item> items = page.getContent().stream()
+                .map(this::mapToItem)
                 .toList();
 
-        String reason = "Top " + items.size() + " highly rated properties"
-                + (params.destination() != null ? " in " + params.destination() : "")
-                + " matching your travel preferences.";
+        String summary = String.format("Found %d top-rated recommendations for %s.",
+                items.size(), params.destination() != null ? params.destination() : "your destination");
 
-        return ToolResult.ok(new PropertyRecommendationResponse(items.size(), reason, items));
+        Response response = new Response(
+                items,
+                items.size(),
+                params.lifestyle() != null ? params.lifestyle() : "GENERAL",
+                summary
+        );
+
+        return ToolResult.ok(response);
+    }
+
+    private Response.Item mapToItem(PropertyResponse p) {
+        String cover = (p.images() != null && !p.images().isEmpty())
+                ? p.images().stream().filter(PropertyImageResponse::isCover).findFirst().map(PropertyImageResponse::objectKey).orElse(p.images().get(0).objectKey())
+                : null;
+
+        List<String> highlights = (p.amenities() != null)
+                ? p.amenities().stream().limit(4).map(com.luna.aggarly.property.dto.response.AmenityResponse::name).toList()
+                : List.of();
+
+        return new Response.Item(
+                p.id(),
+                p.title(),
+                p.description(),
+                p.propertyType() != null ? p.propertyType().name() : null,
+                p.address() != null ? p.address().city() : null,
+                p.address() != null ? p.address().country() : null,
+                p.basePricePerNight() != null ? p.basePricePerNight().doubleValue() : 0.0,
+                p.maxGuests(),
+                p.avgRating() != null ? p.avgRating().doubleValue() : 0.0,
+                p.reviewCount(),
+                cover,
+                highlights
+        );
     }
 
     @Override
     public JsonNode parameterSchema() {
-        return jsonSchemaService.generate(PropertyRecommendationParams.class);
+        return jsonSchemaService.generate(Params.class);
     }
 
     @Override
     public JsonNode responseSchema() {
-        return jsonSchemaService.generate(PropertyRecommendationResponse.class);
-    }
-
-    private PropertySummaryItem toSummaryItem(PropertyResponse p) {
-        String city = p.address() != null ? p.address().city() : null;
-        String country = p.address() != null ? p.address().country() : null;
-        String coverImage = null;
-
-        if (p.images() != null && !p.images().isEmpty()) {
-            coverImage = p.images().stream()
-                    .filter(PropertyImageResponse::isCover)
-                    .findFirst()
-                    .map(PropertyImageResponse::objectKey)
-                    .orElse(p.images().get(0).objectKey());
-        }
-
-        List<String> allImages = (p.images() != null && !p.images().isEmpty())
-                ? p.images().stream().map(img -> formatImageUrl(img.objectKey())).toList()
-                : List.of();
-
-        String formattedCover = formatImageUrl(coverImage);
-
-        return new PropertySummaryItem(
-                p.id(),
-                p.title(),
-                city,
-                country,
-                p.propertyType() != null ? p.propertyType().name() : null,
-                p.maxGuests(),
-                p.bedrooms(),
-                p.bathrooms(),
-                p.basePricePerNight(),
-                p.avgRating(),
-                p.reviewCount(),
-                formattedCover,
-                formattedCover,
-                allImages
-        );
-    }
-
-    private String formatImageUrl(String key) {
-        if (key == null || key.isBlank()) return null;
-        if (key.startsWith("http://") || key.startsWith("https://")) return key;
-        return "http://localhost:8081/api/v1/storage/files/view?key=" + key;
+        return jsonSchemaService.generate(Response.class);
     }
 }

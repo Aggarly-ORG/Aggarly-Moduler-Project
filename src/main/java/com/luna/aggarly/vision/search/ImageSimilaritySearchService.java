@@ -1,6 +1,7 @@
 package com.luna.aggarly.vision.search;
 
 import com.luna.aggarly.filestorage.service.FileStorageService;
+import com.luna.aggarly.vision.pipeline.ImageDomainValidator;
 import com.luna.aggarly.vision.search.records.SearchMode;
 import com.luna.aggarly.vision.search.records.VisionSearchFilters;
 import com.luna.aggarly.vision.search.records.VisionSearchQuery;
@@ -19,6 +20,7 @@ public class ImageSimilaritySearchService {
 
     private final VisionSearchOrchestrator searchOrchestrator;
     private final FileStorageService fileStorageService;
+    private final ImageDomainValidator imageDomainValidator;
 
     public List<VisionSearchResult> findSimilarByImageKey(String referenceObjectKey, String textRefinement, VisionSearchFilters filters, int pageSize) {
         log.info("Image similarity search for objectKey={}, textRefinement={}", referenceObjectKey, textRefinement);
@@ -28,10 +30,17 @@ public class ImageSimilaritySearchService {
                 imageBytes = is.readAllBytes();
             }
         } catch (Exception e) {
-            log.warn("Could not read reference image stream from MinIO for key: {}", referenceObjectKey);
+            log.warn("Could not read reference image stream from storage for key: {}", referenceObjectKey);
+        }
+
+        // 1. Validate that the uploaded search image is within real estate / property domain
+        if (imageBytes.length > 0) {
+            imageDomainValidator.validateOrThrow(imageBytes);
         }
 
         SearchMode mode = (textRefinement != null && !textRefinement.isBlank()) ? SearchMode.MULTIMODAL : SearchMode.IMAGE_ONLY;
+        float minScore = (mode == SearchMode.IMAGE_ONLY) ? 0.38f : 0.25f;
+
         VisionSearchQuery query = new VisionSearchQuery(
                 textRefinement,
                 imageBytes,
@@ -40,7 +49,7 @@ public class ImageSimilaritySearchService {
                 mode,
                 pageSize > 0 ? pageSize : 10,
                 null,
-                0.25f,
+                minScore,
                 filters != null ? filters : VisionSearchFilters.empty()
         );
 

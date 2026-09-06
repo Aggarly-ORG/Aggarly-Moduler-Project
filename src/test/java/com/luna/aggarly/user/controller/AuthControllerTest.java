@@ -144,10 +144,12 @@ class AuthControllerTest {
     @Test
     @DisplayName("POST /api/v1/auth/logout - Should return 200 OK")
     void logout_ShouldReturn200() throws Exception {
+        RefreshTokenRequest request = new RefreshTokenRequest("refresh-token", null);
         doNothing().when(authService).logout("refresh-token");
 
         mockMvc.perform(post("/api/v1/auth/logout")
-                        .param("refreshToken", "refresh-token"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
     }
@@ -238,5 +240,16 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.token").value("authenticated-jwt-token"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/auth/logout - Should return 400 Bad Request when refreshToken is blank")
+    void logout_ShouldReturn400_WhenBlankToken() throws Exception {
+        RefreshTokenRequest request = new RefreshTokenRequest("", null);
+
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest());
     }
 }

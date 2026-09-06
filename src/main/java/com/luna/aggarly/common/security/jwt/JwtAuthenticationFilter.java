@@ -45,7 +45,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 && SecurityContextHolder.getContext().getAuthentication() == null) {
 
             String email = jwtService.extractEmail(jwt);
-            UserDetails userDetails = userDetailsService.loadUserByUsername(email);
+            java.util.UUID sessionId = jwtService.extractSessionId(jwt);
+            UserDetails userDetails;
+            try {
+                userDetails = userDetailsService.loadUserByUsername(email);
+            } catch (Exception ex) {
+                filterChain.doFilter(request, response);
+                return;
+            }
+
+            if (userDetails instanceof com.luna.aggarly.user.security.UserPrincipal principal && sessionId != null) {
+                principal.setSessionId(sessionId);
+            }
 
             UsernamePasswordAuthenticationToken authToken =
                     new UsernamePasswordAuthenticationToken(

@@ -1,21 +1,38 @@
 package com.luna.aggarly.aiagent.tool.booking;
 
+import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.luna.aggarly.aiagent.schema.JsonSchemaService;
 import com.luna.aggarly.aiagent.tool.Tool;
 import com.luna.aggarly.aiagent.tool.ToolResult;
-import com.luna.aggarly.aiagent.tool.booking.record.CancelBookingParams;
-import com.luna.aggarly.aiagent.tool.booking.record.CancelBookingResponse;
 import com.luna.aggarly.booking.dto.BookingResponse;
 import com.luna.aggarly.booking.dto.CancelBookingRequest;
 import com.luna.aggarly.booking.service.BookingService;
 import com.luna.aggarly.user.security.UserPrincipal;
+import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.UUID;
+
 @Component
 @RequiredArgsConstructor
-public class CancelBookingTool implements Tool<CancelBookingParams, CancelBookingResponse> {
+public class CancelBookingTool implements Tool<CancelBookingTool.Params, CancelBookingTool.Response> {
+
+    public record Params(
+            @NotNull
+            @JsonPropertyDescription("The unique identifier of the booking reservation to cancel.")
+            UUID bookingId,
+
+            @JsonPropertyDescription("Optional reason for the cancellation.")
+            String reason
+    ) {}
+
+    public record Response(
+            UUID bookingId,
+            String message,
+            double refundAmount
+    ) {}
 
     private final BookingService bookingService;
     private final JsonSchemaService jsonSchemaService;
@@ -31,8 +48,8 @@ public class CancelBookingTool implements Tool<CancelBookingParams, CancelBookin
     }
 
     @Override
-    public Class<CancelBookingParams> parameterType() {
-        return CancelBookingParams.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -46,14 +63,14 @@ public class CancelBookingTool implements Tool<CancelBookingParams, CancelBookin
     }
 
     @Override
-    public ToolResult<CancelBookingResponse> execute(CancelBookingParams params, UserPrincipal user) {
+    public ToolResult<Response> execute(Params params, UserPrincipal user) {
         CancelBookingRequest req = new CancelBookingRequest(params.reason() != null ? params.reason() : "Cancelled by guest via AI Assistant");
         BookingResponse cancelResp = bookingService.cancelBooking(
                 params.bookingId(),
                 req,
                 user != null ? user.getUserId() : null
         );
-        CancelBookingResponse resp = new CancelBookingResponse(
+        Response resp = new Response(
                 params.bookingId(),
                 "Booking cancelled successfully.",
                 0.0
@@ -63,12 +80,11 @@ public class CancelBookingTool implements Tool<CancelBookingParams, CancelBookin
 
     @Override
     public JsonNode parameterSchema() {
-        return jsonSchemaService.generate(CancelBookingParams.class);
+        return jsonSchemaService.generate(Params.class);
     }
 
     @Override
     public JsonNode responseSchema() {
-        return jsonSchemaService.generate(CancelBookingResponse.class);
+        return jsonSchemaService.generate(Response.class);
     }
 }
-

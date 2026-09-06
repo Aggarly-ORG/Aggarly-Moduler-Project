@@ -11,5 +11,7 @@ import java.util.UUID;
 @Repository
 public interface AiUserMemoryRepository extends JpaRepository<AiUserMemory, UUID> {
     List<AiUserMemory> findByUserIdAndUserConfirmedTrue(UUID userId);
+    List<AiUserMemory> findByUserId(UUID userId);
     Optional<AiUserMemory> findByUserIdAndMemoryKey(UUID userId, String memoryKey);
+    Optional<AiUserMemory> findByUserIdAndMemoryKeyIgnoreCase(UUID userId, String memoryKey);
 }

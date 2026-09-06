@@ -17,6 +17,8 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
 
     Page<Message> findByConversationIdOrderByCreatedAtDesc(UUID conversationId, Pageable pageable);
 
+    Page<Message> findByConversationId(UUID conversationId, Pageable pageable);
+
     @Query("SELECT m FROM Message m WHERE m.conversation.id = :conversationId AND m.createdAt < :beforeTimestamp ORDER BY m.createdAt DESC")
     List<Message> findMessagesBefore(@Param("conversationId") UUID conversationId,
                                      @Param("beforeTimestamp") Instant beforeTimestamp,

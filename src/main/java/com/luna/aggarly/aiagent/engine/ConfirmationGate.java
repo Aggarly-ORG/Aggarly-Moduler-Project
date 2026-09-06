@@ -90,7 +90,7 @@ public class ConfirmationGate {
     }
 
     public String confirmationKey(UUID userId, String toolName) {
-        return "ai:confirmation:" + userId + ":" + toolName;
+        return "ai:confirmation:" + (userId != null ? userId : "guest") + ":" + toolName + ":" + UUID.randomUUID();
     }
 
     private String toJson(Object o) {

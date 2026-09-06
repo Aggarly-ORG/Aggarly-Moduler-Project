@@ -1,19 +1,32 @@
 package com.luna.aggarly.aiagent.tool.booking;
 
+import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.luna.aggarly.aiagent.schema.JsonSchemaService;
 import com.luna.aggarly.aiagent.tool.Tool;
 import com.luna.aggarly.aiagent.tool.ToolResult;
-import com.luna.aggarly.aiagent.tool.booking.record.BookingConfirmationParams;
-import com.luna.aggarly.aiagent.tool.booking.record.BookingConfirmationResponse;
 import com.luna.aggarly.booking.service.BookingService;
 import com.luna.aggarly.user.security.UserPrincipal;
+import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.UUID;
+
 @Component
 @RequiredArgsConstructor
-public class BookingConfirmationTool implements Tool<BookingConfirmationParams, BookingConfirmationResponse> {
+public class BookingConfirmationTool implements Tool<BookingConfirmationTool.Params, BookingConfirmationTool.Response> {
+
+    public record Params(
+            @NotNull
+            @JsonPropertyDescription("The unique identifier of the booking reservation to confirm.")
+            UUID bookingId
+    ) {}
+
+    public record Response(
+            String message,
+            boolean confirmed
+    ) {}
 
     private final BookingService bookingService;
     private final JsonSchemaService jsonSchemaService;
@@ -29,8 +42,8 @@ public class BookingConfirmationTool implements Tool<BookingConfirmationParams, 
     }
 
     @Override
-    public Class<BookingConfirmationParams> parameterType() {
-        return BookingConfirmationParams.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -44,20 +57,19 @@ public class BookingConfirmationTool implements Tool<BookingConfirmationParams, 
     }
 
     @Override
-    public ToolResult<BookingConfirmationResponse> execute(BookingConfirmationParams params, UserPrincipal user) {
+    public ToolResult<Response> execute(Params params, UserPrincipal user) {
         bookingService.confirmBooking(params.bookingId());
-        BookingConfirmationResponse resp = new BookingConfirmationResponse("Booking " + params.bookingId() + " successfully confirmed.", true);
+        Response resp = new Response("Booking " + params.bookingId() + " successfully confirmed.", true);
         return ToolResult.ok(resp);
     }
 
     @Override
     public JsonNode parameterSchema() {
-        return jsonSchemaService.generate(BookingConfirmationParams.class);
+        return jsonSchemaService.generate(Params.class);
     }
 
     @Override
     public JsonNode responseSchema() {
-        return jsonSchemaService.generate(BookingConfirmationResponse.class);
+        return jsonSchemaService.generate(Response.class);
     }
 }
-

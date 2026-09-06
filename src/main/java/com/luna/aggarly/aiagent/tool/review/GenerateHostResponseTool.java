@@ -10,9 +10,9 @@ import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
-public class GenerateHostResponseTool implements Tool<GenerateHostResponseTool.GenerateHostResponseRequest, String> {
+public class GenerateHostResponseTool implements Tool<GenerateHostResponseTool.Params, String> {
 
-    public record GenerateHostResponseRequest(
+    public record Params(
             UUID reviewId,
             String tone
     ) {}
@@ -28,8 +28,8 @@ public class GenerateHostResponseTool implements Tool<GenerateHostResponseTool.G
     }
 
     @Override
-    public Class<GenerateHostResponseRequest> parameterType() {
-        return GenerateHostResponseRequest.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -38,7 +38,7 @@ public class GenerateHostResponseTool implements Tool<GenerateHostResponseTool.G
     }
 
     @Override
-    public ToolResult<String> execute(GenerateHostResponseRequest params, UserPrincipal user) {
+    public ToolResult<String> execute(Params params, UserPrincipal user) {
         String draft = "Thank you so much for your review! It was a pleasure hosting you, and we hope to welcome you back again soon.";
         return ToolResult.ok(draft);
     }

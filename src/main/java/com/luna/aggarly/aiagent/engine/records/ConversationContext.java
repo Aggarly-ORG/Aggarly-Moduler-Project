@@ -4,14 +4,20 @@ import com.luna.aggarly.aiagent.entity.AiSearchContext;
 import com.luna.aggarly.aiagent.entity.AiUserMemory;
 
 import java.util.List;
+import java.util.UUID;
 
 public record ConversationContext(
+        UUID conversationId,
         AiSearchContext activeSearchContext,
         List<AiUserMemory> userMemories,
         List<ChatMessage> conversationHistory
 ) {
     public ConversationContext(AiSearchContext activeSearchContext, List<AiUserMemory> userMemories) {
-        this(activeSearchContext, userMemories, List.of());
+        this(null, activeSearchContext, userMemories, List.of());
+    }
+
+    public ConversationContext(AiSearchContext activeSearchContext, List<AiUserMemory> userMemories, List<ChatMessage> conversationHistory) {
+        this(null, activeSearchContext, userMemories, conversationHistory);
     }
 
     public String activeFilters() {

@@ -22,6 +22,8 @@ public class UserPrincipal implements UserDetails, OAuth2User {
 
     private final User user;
     private final Map<String, Object> attributes;
+    @lombok.Setter
+    private UUID sessionId;
 
     public UserPrincipal(User user) {
         this(user, Collections.emptyMap());
@@ -70,7 +72,7 @@ public class UserPrincipal implements UserDetails, OAuth2User {
 
     @Override
     public boolean isEnabled() {
-        return true;
+        return user != null && !user.isDeleted();
     }
 
     @Override

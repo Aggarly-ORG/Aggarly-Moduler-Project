@@ -15,15 +15,20 @@ import com.luna.aggarly.user.service.AuthService;
 import com.luna.aggarly.user.service.EmailService;
 import com.luna.aggarly.user.service.MfaService;
 import com.luna.aggarly.user.service.OtpService;
+import com.luna.aggarly.user.service.UserSessionService;
 import com.luna.aggarly.user.utils.QrCodeGenerator;
 import com.warrenstrange.googleauth.GoogleAuthenticator;
 import com.warrenstrange.googleauth.GoogleAuthenticatorKey;
 import com.warrenstrange.googleauth.GoogleAuthenticatorQRGenerator;
 import jakarta.mail.MessagingException;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jboss.aerogear.security.otp.Totp;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -57,6 +62,8 @@ public class AuthServiceImpl implements AuthService {
     private final MfaService mfaService;
     private final GoogleAuthenticator googleAuthenticator;
     private final EmailService emailService;
+    private final UserSessionService userSessionService;
+
     @Value("${app.jwt.access-token-expiration-ms:900000}")
     private long jwtExpiration;
 
@@ -115,9 +122,9 @@ public class AuthServiceImpl implements AuthService {
         UserPrincipal userDetails = (UserPrincipal) authentication.getPrincipal();
         User user = userDetails.getUser();
 
-        refreshTokenRepository.revokeAllUserTokens(user);
-        if(user.isMfaEnabled())
+        if (user.isMfaEnabled()) {
             return mfaService.create(user.getId());
+        }
         return issueTokens(user);
     }
 
@@ -150,7 +157,7 @@ public class AuthServiceImpl implements AuthService {
     public RequestMfaResponse requestMfa(){
         User user = getAuthenticatedUser();
         if(user.isMfaEnabled()) {
-            throw new RuntimeException("");
+            throw new VerificationException("MFA is already enabled for this account");
         }
 
         GoogleAuthenticatorKey key = googleAuthenticator.createCredentials();
@@ -192,23 +199,101 @@ public class AuthServiceImpl implements AuthService {
         RefreshToken oldToken = refreshTokenRepository.findByToken(request.refreshToken())
                 .orElseThrow(() -> new InvalidRefreshTokenException("Invalid refresh token"));
 
-        String expiredAccessTokenHash = hashToken(request.expiredAccessToken());
-        if (request.expiredAccessToken() == null ||
-                !expiredAccessTokenHash.equals(oldToken.getAssociatedAccessTokenHash())) {
-            refreshTokenRepository.revokeAllUserTokens(oldToken.getUser());
-            throw new InvalidRefreshTokenException("Session binding failed. Security token revoked.");
+        // Revoked Token Detection & 15-second Concurrency Mercy Window
+        if (oldToken.isRevoked()) {
+            Instant revokedAt = oldToken.getRevokedAt() != null ? oldToken.getRevokedAt() : oldToken.getUpdatedAt();
+            long secondsSinceRevocation = revokedAt != null
+                    ? Math.max(0, Duration.between(revokedAt, Instant.now()).toSeconds())
+                    : 9999L;
+
+            if (secondsSinceRevocation <= 15) {
+                log.warn("⚠️ Refresh token replay within 15s grace window ({}s elapsed) for family {}. Returning active successor.",
+                        secondsSinceRevocation, oldToken.getFamilyId());
+
+                RefreshToken activeToken = null;
+                if (oldToken.getReplacedByToken() != null) {
+                    activeToken = refreshTokenRepository.findByToken(oldToken.getReplacedByToken()).orElse(null);
+                }
+                if (activeToken == null || activeToken.isRevoked()) {
+                    activeToken = refreshTokenRepository.findFirstByFamilyIdAndRevokedFalse(oldToken.getFamilyId()).orElse(null);
+                }
+
+                if (activeToken != null) {
+                    UUID sessionId = userSessionService.getSessionIdByFamilyId(oldToken.getFamilyId());
+                    String freshAccessToken = sessionId != null
+                            ? jwtService.generateToken(oldToken.getUser(), sessionId)
+                            : jwtService.generateToken(oldToken.getUser());
+                    activeToken.setAssociatedAccessTokenHash(hashToken(freshAccessToken));
+                    refreshTokenRepository.save(activeToken);
+
+                    return AuthResponse.builder()
+                            .status(AuthStatus.AUTH_SUCCESS)
+                            .token(freshAccessToken)
+                            .refreshToken(activeToken.getToken())
+                            .expiresIn(jwtExpiration)
+                            .build();
+                }
+            }
+
+            // Outside 15s window: Security breach / token theft replay attack detected!
+            log.error("🚨 Potential refresh token theft detected! Revoked token reused after {}s. Revoking entire family {}",
+                    secondsSinceRevocation, oldToken.getFamilyId());
+            refreshTokenRepository.revokeFamily(oldToken.getFamilyId(), Instant.now());
+            userSessionService.revokeSessionByFamilyId(oldToken.getFamilyId());
+            throw new InvalidRefreshTokenException("Compromised session detected. Token family revoked. Please log in again.");
         }
 
-        if (oldToken.isRevoked() || oldToken.getExpiryDate().isBefore(Instant.now())) {
-            refreshTokenRepository.revokeAllUserTokens(oldToken.getUser());
-            throw new InvalidRefreshTokenException("Refresh token is expired or has been reused.");
+        if (oldToken.getExpiryDate().isBefore(Instant.now())) {
+            refreshTokenRepository.revokeFamily(oldToken.getFamilyId(), Instant.now());
+            userSessionService.revokeSessionByFamilyId(oldToken.getFamilyId());
+            throw new InvalidRefreshTokenException("Refresh token is expired. Please log in again.");
         }
 
+        // Optional check for expiredAccessToken if provided by client
+        if (request.expiredAccessToken() != null && !request.expiredAccessToken().isBlank()) {
+            String expiredAccessTokenHash = hashToken(request.expiredAccessToken());
+            if (oldToken.getAssociatedAccessTokenHash() != null &&
+                    !expiredAccessTokenHash.equals(oldToken.getAssociatedAccessTokenHash())) {
+                log.warn("Access token hash mismatch during refresh for family {}. Revoking family.", oldToken.getFamilyId());
+                refreshTokenRepository.revokeFamily(oldToken.getFamilyId(), Instant.now());
+                userSessionService.revokeSessionByFamilyId(oldToken.getFamilyId());
+                throw new InvalidRefreshTokenException("Session binding failed. Security token revoked.");
+            }
+        }
+
+        // Normal Rotation: Rotate token within the same family
         User user = oldToken.getUser();
+        userSessionService.updateActivity(oldToken.getFamilyId());
+        UUID sessionId = userSessionService.getSessionIdByFamilyId(oldToken.getFamilyId());
+        String newAccessToken = sessionId != null
+                ? jwtService.generateToken(user, sessionId)
+                : jwtService.generateToken(user);
+        String newRefreshTokenValue = UUID.randomUUID().toString();
+        Instant now = Instant.now();
+
         oldToken.setRevoked(true);
+        oldToken.setRevokedAt(now);
+        oldToken.setReplacedByToken(newRefreshTokenValue);
         refreshTokenRepository.save(oldToken);
 
-        return issueTokens(user);
+        RefreshToken newToken = RefreshToken.builder()
+                .token(newRefreshTokenValue)
+                .familyId(oldToken.getFamilyId()) // Maintain same family lineage
+                .associatedAccessTokenHash(hashToken(newAccessToken))
+                .user(user)
+                .expiryDate(now.plus(Duration.ofDays(refreshExpirationDays)))
+                .revoked(false)
+                .revokedAt(null)
+                .replacedByToken(null)
+                .build();
+        refreshTokenRepository.save(newToken);
+
+        return AuthResponse.builder()
+                .status(AuthStatus.AUTH_SUCCESS)
+                .token(newAccessToken)
+                .refreshToken(newRefreshTokenValue)
+                .expiresIn(jwtExpiration)
+                .build();
     }
 
     @Override
@@ -217,8 +302,9 @@ public class AuthServiceImpl implements AuthService {
         RefreshToken token = refreshTokenRepository.findByToken(refreshToken)
                 .orElseThrow(() -> new InvalidRefreshTokenException("Invalid refresh token"));
 
-        token.setRevoked(true);
-        refreshTokenRepository.save(token);
+        refreshTokenRepository.revokeFamily(token.getFamilyId(), Instant.now());
+        userSessionService.revokeSessionByFamilyId(token.getFamilyId());
+        log.info("🚪 Session family {} logged out successfully", token.getFamilyId());
     }
 
     @Override
@@ -287,9 +373,9 @@ public class AuthServiceImpl implements AuthService {
 
         try {
             emailService.send(email, "Email Verification", html);
-            log.info("sent 6-digit Email verification OTP for {}: {}", email, otpCode);
+            log.info("Sent 6-digit Email verification OTP for {}", email);
         }catch (MessagingException ex){
-            log.error("failed to send 6-digit Email verification OTP for {}: {}", email, otpCode);
+            log.error("Failed to send 6-digit Email verification OTP for {}", email);
         }
     }
 
@@ -329,9 +415,9 @@ public class AuthServiceImpl implements AuthService {
 
         try {
             emailService.send(request.email(), "Email Verification", html);
-            log.info("sent 6-digit verification OTP for {}: {}", request.email(), otpCode);
+            log.info("Sent 6-digit verification OTP for {}", request.email());
         }catch (MessagingException ex){
-            log.error("failed to send 6-digit verification OTP for {}: {}", request.email(), otpCode);
+            log.error("Failed to send 6-digit verification OTP for {}", request.email());
         }
     }
 
@@ -427,6 +513,7 @@ public class AuthServiceImpl implements AuthService {
         user.setDeleted(true);
         userRepository.save(user);
         refreshTokenRepository.revokeAllUserTokens(user);
+        userSessionService.revokeAllSessions(user.getId());
         log.info("🗑️ Account deactivated for user: {}", user.getEmail());
     }
 
@@ -442,15 +529,28 @@ public class AuthServiceImpl implements AuthService {
 
     @Transactional(propagation = Propagation.MANDATORY)
     private AuthResponse issueTokens(User user) {
-        String accessToken = jwtService.generateToken(user);
+        return issueTokens(user, UUID.randomUUID());
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    private AuthResponse issueTokens(User user, UUID familyId) {
+        UUID effectiveFamilyId = familyId != null ? familyId : UUID.randomUUID();
+        UserSession session = userSessionService.createSession(user, effectiveFamilyId, getCurrentHttpRequest());
+        UUID sessionId = session != null ? session.getId() : null;
+        String accessToken = sessionId != null
+                ? jwtService.generateToken(user, sessionId)
+                : jwtService.generateToken(user);
         String refreshTokenValue = UUID.randomUUID().toString();
 
         RefreshToken refreshToken = RefreshToken.builder()
                 .token(refreshTokenValue)
+                .familyId(effectiveFamilyId)
                 .associatedAccessTokenHash(hashToken(accessToken))
                 .user(user)
                 .expiryDate(Instant.now().plus(Duration.ofDays(refreshExpirationDays)))
                 .revoked(false)
+                .revokedAt(null)
+                .replacedByToken(null)
                 .build();
         refreshTokenRepository.save(refreshToken);
         return AuthResponse.builder()
@@ -459,6 +559,14 @@ public class AuthServiceImpl implements AuthService {
                     .refreshToken(refreshTokenValue)
                     .expiresIn(jwtExpiration)
                     .build();
+    }
+
+    private HttpServletRequest getCurrentHttpRequest() {
+        RequestAttributes attribs = RequestContextHolder.getRequestAttributes();
+        if (attribs instanceof ServletRequestAttributes servletRequestAttributes) {
+            return servletRequestAttributes.getRequest();
+        }
+        return null;
     }
 
     private String hashToken(String token) {

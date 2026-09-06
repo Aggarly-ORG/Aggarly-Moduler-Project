@@ -92,8 +92,7 @@ public class SecurityConfig {
                             "/api/v1/storage/files/view/**",
                             "/api/v1/vision/search",
                             "/api/v1/vision/search/**",
-                            "/api/v1/vision/admin/ollama/**",
-                            "/api/v1/vision/admin/models"
+                            "/api/v1/vision/image/{imageId}/metadata"
                     ).permitAll()
                     .requestMatchers(
                             "/swagger-ui.html",

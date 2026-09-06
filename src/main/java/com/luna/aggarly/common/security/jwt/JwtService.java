@@ -52,8 +52,15 @@ public class JwtService {
     }
 
     public String generateToken(User user) {
+        return generateToken(user, null);
+    }
+
+    public String generateToken(User user, UUID sessionId) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", user.getId().toString());
+        if (sessionId != null) {
+            claims.put("sessionId", sessionId.toString());
+        }
         claims.put("roles", user.getRoles().stream()
                 .map(role -> role.getName())
                 .collect(Collectors.toList()));
@@ -62,10 +69,20 @@ public class JwtService {
     }
 
     public String generateToken(UserDetails userDetails) {
+        return generateToken(userDetails, null);
+    }
+
+    public String generateToken(UserDetails userDetails, UUID sessionId) {
         Map<String, Object> claims = new HashMap<>();
 
         if (userDetails instanceof UserPrincipal principal) {
             claims.put("userId", principal.getUserId().toString());
+            if (sessionId == null && principal.getSessionId() != null) {
+                sessionId = principal.getSessionId();
+            }
+        }
+        if (sessionId != null) {
+            claims.put("sessionId", sessionId.toString());
         }
         claims.put("roles", userDetails.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
@@ -102,6 +119,15 @@ public class JwtService {
     public UUID extractUserId(String token) {
         String userIdStr = extractClaims(token).get("userId", String.class);
         return userIdStr != null ? UUID.fromString(userIdStr) : null;
+    }
+
+    public UUID extractSessionId(String token) {
+        try {
+            String sessionIdStr = extractClaims(token).get("sessionId", String.class);
+            return sessionIdStr != null ? UUID.fromString(sessionIdStr) : null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private String buildToken(Map<String, Object> claims, String subject) {

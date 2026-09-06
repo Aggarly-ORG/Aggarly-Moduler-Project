@@ -13,7 +13,11 @@ import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
-public class FavoritesTool implements Tool<UUID, List<WishlistResponse>> {
+public class FavoritesTool implements Tool<FavoritesTool.Params, List<WishlistResponse>> {
+
+    public record Params(
+            UUID userId
+    ) {}
 
     private final WishlistService wishlistService;
 
@@ -28,8 +32,8 @@ public class FavoritesTool implements Tool<UUID, List<WishlistResponse>> {
     }
 
     @Override
-    public Class<UUID> parameterType() {
-        return UUID.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -43,8 +47,10 @@ public class FavoritesTool implements Tool<UUID, List<WishlistResponse>> {
     }
 
     @Override
-    public ToolResult<List<WishlistResponse>> execute(UUID userId, UserPrincipal user) {
-        UUID targetUserId = userId != null ? userId : (user != null ? user.getUserId() : null);
+    public ToolResult<List<WishlistResponse>> execute(Params params, UserPrincipal user) {
+        UUID targetUserId = (params != null && params.userId() != null)
+                ? params.userId()
+                : (user != null ? user.getUserId() : null);
         if (targetUserId == null) {
             return ToolResult.failed("AUTH_REQUIRED", "User must be authenticated to view favorites.");
         }

@@ -12,7 +12,11 @@ import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
-public class PriceRecommendationTool implements Tool<UUID, Map<String, Object>> {
+public class PriceRecommendationTool implements Tool<PriceRecommendationTool.Params, Map<String, Object>> {
+
+    public record Params(
+            UUID propertyId
+    ) {}
 
     @Override
     public String name() {
@@ -25,8 +29,8 @@ public class PriceRecommendationTool implements Tool<UUID, Map<String, Object>> 
     }
 
     @Override
-    public Class<UUID> parameterType() {
-        return UUID.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -35,7 +39,7 @@ public class PriceRecommendationTool implements Tool<UUID, Map<String, Object>> 
     }
 
     @Override
-    public ToolResult<Map<String, Object>> execute(UUID propertyId, UserPrincipal user) {
+    public ToolResult<Map<String, Object>> execute(Params params, UserPrincipal user) {
         return ToolResult.ok(Map.of(
                 "recommendedNightlyPrice", new BigDecimal("145.00"),
                 "minRecommended", new BigDecimal("120.00"),

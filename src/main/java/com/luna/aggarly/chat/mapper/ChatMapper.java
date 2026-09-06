@@ -23,6 +23,9 @@ public interface ChatMapper {
 
     List<ConversationSummaryResponse> toSummaryResponseList(List<Conversation> conversations);
 
+    @Mapping(target = "displayName", ignore = true)
+    @Mapping(target = "username", ignore = true)
+    @Mapping(target = "avatarUrl", ignore = true)
     ConversationParticipantResponse toResponse(ConversationParticipant participant);
 
     List<ConversationParticipantResponse> toParticipantResponseList(List<ConversationParticipant> participants);

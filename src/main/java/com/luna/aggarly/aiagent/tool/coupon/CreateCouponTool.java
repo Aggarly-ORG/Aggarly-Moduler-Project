@@ -9,9 +9,21 @@ import com.luna.aggarly.user.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+import java.time.Instant;
+
 @Component
 @RequiredArgsConstructor
-public class CreateCouponTool implements Tool<CouponRequest, CouponResponse> {
+public class CreateCouponTool implements Tool<CreateCouponTool.Params, CouponResponse> {
+
+    public record Params(
+            String code,
+            String adjustmentType,
+            BigDecimal adjustmentValue,
+            Instant expiresAt,
+            Integer maxRedemptions,
+            BigDecimal minSubtotal
+    ) {}
 
     private final CouponService couponService;
 
@@ -26,8 +38,8 @@ public class CreateCouponTool implements Tool<CouponRequest, CouponResponse> {
     }
 
     @Override
-    public Class<CouponRequest> parameterType() {
-        return CouponRequest.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -41,8 +53,16 @@ public class CreateCouponTool implements Tool<CouponRequest, CouponResponse> {
     }
 
     @Override
-    public ToolResult<CouponResponse> execute(CouponRequest params, UserPrincipal user) {
-        CouponResponse response = couponService.createCoupon(params);
+    public ToolResult<CouponResponse> execute(Params params, UserPrincipal user) {
+        CouponRequest request = new CouponRequest(
+                params.code(),
+                params.adjustmentType(),
+                params.adjustmentValue(),
+                params.expiresAt(),
+                params.maxRedemptions(),
+                params.minSubtotal()
+        );
+        CouponResponse response = couponService.createCoupon(request);
         return ToolResult.ok(response);
     }
 }

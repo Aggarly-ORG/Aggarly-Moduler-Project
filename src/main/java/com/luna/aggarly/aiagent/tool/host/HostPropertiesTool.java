@@ -20,7 +20,11 @@ import java.util.UUID;
  */
 @Component
 @RequiredArgsConstructor
-public class HostPropertiesTool implements Tool<UUID, List<PropertyResponse>> {
+public class HostPropertiesTool implements Tool<HostPropertiesTool.Params, List<PropertyResponse>> {
+
+    public record Params(
+            UUID hostId
+    ) {}
 
     private final PropertyService propertyService;
     private final JsonSchemaService jsonSchemaService;
@@ -37,7 +41,7 @@ public class HostPropertiesTool implements Tool<UUID, List<PropertyResponse>> {
 
     @Override
     public JsonNode parameterSchema() {
-        return jsonSchemaService.generate(UUID.class);
+        return jsonSchemaService.generate(Params.class);
     }
 
     @Override
@@ -46,8 +50,8 @@ public class HostPropertiesTool implements Tool<UUID, List<PropertyResponse>> {
     }
 
     @Override
-    public Class<UUID> parameterType() {
-        return UUID.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -61,8 +65,10 @@ public class HostPropertiesTool implements Tool<UUID, List<PropertyResponse>> {
     }
 
     @Override
-    public ToolResult<List<PropertyResponse>> execute(UUID hostId, UserPrincipal user) {
-        UUID targetHostId = (hostId != null) ? hostId : (user != null ? user.getUserId() : null);
+    public ToolResult<List<PropertyResponse>> execute(Params params, UserPrincipal user) {
+        UUID targetHostId = (params != null && params.hostId() != null)
+                ? params.hostId()
+                : (user != null ? user.getUserId() : null);
         if (targetHostId == null) {
             return ToolResult.failed("UNAUTHENTICATED", "Host identity is required");
         }

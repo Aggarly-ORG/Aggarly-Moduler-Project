@@ -10,7 +10,12 @@ import java.util.List;
 
 @Component
 @RequiredArgsConstructor
-public class RestaurantsTool implements Tool<String, List<String>> {
+public class RestaurantsTool implements Tool<RestaurantsTool.Params, List<String>> {
+
+    public record Params(
+            String location,
+            String cuisine
+    ) {}
 
     @Override
     public String name() {
@@ -23,8 +28,8 @@ public class RestaurantsTool implements Tool<String, List<String>> {
     }
 
     @Override
-    public Class<String> parameterType() {
-        return String.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -33,7 +38,7 @@ public class RestaurantsTool implements Tool<String, List<String>> {
     }
 
     @Override
-    public ToolResult<List<String>> execute(String location, UserPrincipal user) {
+    public ToolResult<List<String>> execute(Params params, UserPrincipal user) {
         return ToolResult.ok(List.of(
                 "Trattoria Bella Vista (Italian, ★ 4.9)",
                 "Le Petit Cafe (Bakery & Coffee, ★ 4.8)",

@@ -33,7 +33,17 @@ public class OllamaConfig {
 
     @Bean
     public OllamaApi ollamaApi() {
-        return new OllamaApi.Builder().baseUrl(baseUrl).build();
+        var requestFactory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(java.time.Duration.ofSeconds(30));
+        requestFactory.setReadTimeout(java.time.Duration.ofSeconds(180));
+
+        org.springframework.web.client.RestClient.Builder restClientBuilder = org.springframework.web.client.RestClient.builder()
+                .requestFactory(requestFactory);
+
+        return new OllamaApi.Builder()
+                .baseUrl(baseUrl)
+                .restClientBuilder(restClientBuilder)
+                .build();
     }
 
     @Bean

@@ -49,8 +49,8 @@ public class PropertyDescriptionEmbeddingService {
 
             Map<String, Object> payload = new HashMap<>();
             payload.put("propertyId", property.getId().toString());
-            payload.put("city", property.getAddress() != null ? property.getAddress().getCity() : "");
-            payload.put("country", property.getAddress() != null ? property.getAddress().getCountry() : "");
+            payload.put("city", property.getAddress() != null && property.getAddress().getCity() != null ? property.getAddress().getCity().trim().toLowerCase() : "");
+            payload.put("country", property.getAddress() != null && property.getAddress().getCountry() != null ? property.getAddress().getCountry().trim().toLowerCase() : "");
             payload.put("pricePerNight", property.getBasePricePerNight() != null ? property.getBasePricePerNight().doubleValue() : 0.0);
             payload.put("maxGuests", property.getMaxGuests() != 0 ? property.getMaxGuests() : 2);
             payload.put("propertyType", property.getPropertyType() != null ? property.getPropertyType().name() : "APARTMENT");

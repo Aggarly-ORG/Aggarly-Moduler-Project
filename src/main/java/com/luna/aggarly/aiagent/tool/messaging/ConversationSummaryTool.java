@@ -16,10 +16,10 @@ import java.util.stream.Collectors;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class ConversationSummaryTool implements Tool<UUID, String> {
+public class ConversationSummaryTool implements Tool<ConversationSummaryTool.Params, String> {
 
     private final ConversationService conversationService;
-
+    record Params (UUID conversationId){}
     @Override
     public String name() {
         return "messaging.summary";
@@ -31,8 +31,8 @@ public class ConversationSummaryTool implements Tool<UUID, String> {
     }
 
     @Override
-    public Class<UUID> parameterType() {
-        return UUID.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -46,13 +46,13 @@ public class ConversationSummaryTool implements Tool<UUID, String> {
     }
 
     @Override
-    public ToolResult<String> execute(UUID conversationId, UserPrincipal user) {
+    public ToolResult<String> execute(Params params, UserPrincipal user) {
         try {
             if (user == null || user.getUserId() == null) {
                 return ToolResult.failed("AUTH_REQUIRED", "User must be authenticated to access conversation history.");
             }
             UUID userId = user.getUserId();
-            List<MessageResponse> messages = conversationService.getRecentMessages(conversationId, 20, userId);
+            List<MessageResponse> messages = conversationService.getRecentMessages(params.conversationId, 20, userId);
 
             if (messages.isEmpty()) {
                 return ToolResult.ok("No messages in this conversation yet.");

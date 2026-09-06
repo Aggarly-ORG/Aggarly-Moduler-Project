@@ -10,7 +10,11 @@ import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
-public class RefundPolicyTool implements Tool<UUID, String> {
+public class RefundPolicyTool implements Tool<RefundPolicyTool.Params, String> {
+
+    public record Params(
+            UUID bookingId
+    ) {}
 
     @Override
     public String name() {
@@ -23,8 +27,8 @@ public class RefundPolicyTool implements Tool<UUID, String> {
     }
 
     @Override
-    public Class<UUID> parameterType() {
-        return UUID.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -33,7 +37,7 @@ public class RefundPolicyTool implements Tool<UUID, String> {
     }
 
     @Override
-    public ToolResult<String> execute(UUID bookingId, UserPrincipal user) {
+    public ToolResult<String> execute(Params params, UserPrincipal user) {
         return ToolResult.ok("Cancellation Policy: Full refund if cancelled 48+ hours before check-in. 50% refund if cancelled within 24–48 hours.");
     }
 }

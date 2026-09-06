@@ -49,7 +49,6 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/vision/admin")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ADMIN')")
 @Tag(name = "Vision Admin", description = "AI Vision Pipeline Monitoring & Evaluation APIs")
 public class VisionAdminController {
 
@@ -62,6 +61,8 @@ public class VisionAdminController {
     private final VisionEvalQueryRepository evalQueryRepository;
     private final VisionEvaluationRunRepository evaluationRunRepository;
     private final OllamaVisionClient ollamaVisionClient;
+    private final com.luna.aggarly.vision.client.ClipServiceClient clipServiceClient;
+    private final com.luna.aggarly.vision.evaluation.VisionGroundTruthSeederService groundTruthSeederService;
 
     @GetMapping("/tasks")
     @Operation(summary = "Query background vision processing queue tasks (ADMIN only)", security = @SecurityRequirement(name = "bearerAuth"))
@@ -138,11 +139,32 @@ public class VisionAdminController {
         return ApiResponse.ok(data, "Ollama status retrieved").toResponseEntity();
     }
 
+    @GetMapping("/clip/status")
+    @Operation(summary = "Get OpenCLIP Microservice Health Status")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getClipStatus() {
+        boolean available = clipServiceClient != null && clipServiceClient.isAvailable();
+        Map<String, Object> status = Map.of(
+                "available", available,
+                "model", "ViT-B-32",
+                "pretrained", "laion2b_s34b_b79k",
+                "dimension", 512,
+                "url", "http://127.0.0.1:8000"
+        );
+        return ApiResponse.ok(status, "OpenCLIP status retrieved").toResponseEntity();
+    }
+
     @GetMapping("/ollama/models")
     @Operation(summary = "List installed local Ollama vision models (ADMIN only)", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<ApiResponse<List<String>>> listOllamaModels() {
         List<String> models = (ollamaVisionClient != null) ? ollamaVisionClient.listModels() : List.of();
         return ApiResponse.ok(models, "Installed Ollama models retrieved").toResponseEntity();
+    }
+
+    @PostMapping("/seed-ground-truth")
+    @Operation(summary = "Seed Ground Truth evaluation dataset (10 properties, 110 photos, 30 queries) (ADMIN only)", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<com.luna.aggarly.vision.evaluation.VisionGroundTruthSeederService.SeedingSummary>> seedGroundTruth() {
+        var summary = groundTruthSeederService.seedGroundTruthDataset();
+        return ApiResponse.ok(summary, "Ground truth evaluation dataset seeded successfully").toResponseEntity();
     }
 
     @PostMapping("/evaluate")

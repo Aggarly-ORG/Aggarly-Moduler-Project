@@ -13,7 +13,11 @@ import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
-public class UserHistoryTool implements Tool<UUID, List<BookingResponse>> {
+public class UserHistoryTool implements Tool<UserHistoryTool.Params, List<BookingResponse>> {
+
+    public record Params(
+            UUID userId
+    ) {}
 
     private final BookingService bookingService;
 
@@ -28,8 +32,8 @@ public class UserHistoryTool implements Tool<UUID, List<BookingResponse>> {
     }
 
     @Override
-    public Class<UUID> parameterType() {
-        return UUID.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -43,8 +47,10 @@ public class UserHistoryTool implements Tool<UUID, List<BookingResponse>> {
     }
 
     @Override
-    public ToolResult<List<BookingResponse>> execute(UUID userId, UserPrincipal user) {
-        UUID targetUserId = userId != null ? userId : (user != null ? user.getUserId() : null);
+    public ToolResult<List<BookingResponse>> execute(Params params, UserPrincipal user) {
+        UUID targetUserId = (params != null && params.userId() != null)
+                ? params.userId()
+                : (user != null ? user.getUserId() : null);
         if (targetUserId == null) {
             return ToolResult.failed("AUTH_REQUIRED", "User must be authenticated to view booking history.");
         }

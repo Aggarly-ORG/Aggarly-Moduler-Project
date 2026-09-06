@@ -1,23 +1,55 @@
 package com.luna.aggarly.aiagent.tool.booking;
 
+import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.luna.aggarly.aiagent.schema.JsonSchemaService;
 import com.luna.aggarly.aiagent.tool.Tool;
 import com.luna.aggarly.aiagent.tool.ToolResult;
-import com.luna.aggarly.aiagent.tool.booking.record.PriceExplanationParams;
-import com.luna.aggarly.aiagent.tool.booking.record.PriceExplanationToolResponse;
+import com.luna.aggarly.pricing.dto.PriceLineItem;
 import com.luna.aggarly.pricing.dto.PriceQuoteResponse;
 import com.luna.aggarly.pricing.service.PricingRuleService;
 import com.luna.aggarly.user.security.UserPrincipal;
+import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.util.UUID;
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
-public class PriceExplanationTool implements Tool<PriceExplanationParams, PriceExplanationToolResponse> {
+public class PriceExplanationTool implements Tool<PriceExplanationTool.Params, PriceExplanationTool.Response> {
+
+    public record Params(
+            @NotNull(message = "Property ID is required")
+            @JsonPropertyDescription("The UUID of the property to calculate price for.")
+            UUID propertyId,
+
+            @JsonPropertyDescription("Check-in date in YYYY-MM-DD format (defaults to tomorrow if omitted).")
+            String checkIn,
+
+            @JsonPropertyDescription("Check-out date in YYYY-MM-DD format (defaults to 3 days from tomorrow).")
+            String checkOut,
+
+            @JsonPropertyDescription("Optional promotional coupon code to apply.")
+            String couponCode
+    ) {}
+
+    public record Response(
+            UUID propertyId,
+            double basePricePerNight,
+            int totalNights,
+            double totalBasePrice,
+            double cleaningFee,
+            double serviceFee,
+            double taxAmount,
+            double discountAmount,
+            double totalAmount,
+            String currency,
+            String breakdownSummary
+    ) {}
 
     private final PricingRuleService pricingRuleService;
     private final JsonSchemaService jsonSchemaService;
@@ -29,12 +61,12 @@ public class PriceExplanationTool implements Tool<PriceExplanationParams, PriceE
 
     @Override
     public String description() {
-        return "Get a complete pricing breakdown, including base rate, discounts, taxes, and service fees.";
+        return "Calculate a complete pricing breakdown for a stay including base rate per night, total nights, cleaning fee, service fee, taxes, coupon discounts, and grand total.";
     }
 
     @Override
-    public Class<PriceExplanationParams> parameterType() {
-        return PriceExplanationParams.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -44,57 +76,68 @@ public class PriceExplanationTool implements Tool<PriceExplanationParams, PriceE
 
     @Override
     public boolean requiresAuthentication() {
-        return true;
+        return false;
     }
 
     @Override
-    public ToolResult<PriceExplanationToolResponse> execute(PriceExplanationParams params, UserPrincipal user) {
+    public ToolResult<Response> execute(Params params, UserPrincipal user) {
         UUID userId = user != null ? user.getUserId() : null;
+        LocalDate checkInDate = params.checkIn() != null ? LocalDate.parse(params.checkIn()) : LocalDate.now().plusDays(1);
+        LocalDate checkOutDate = params.checkOut() != null ? LocalDate.parse(params.checkOut()) : LocalDate.now().plusDays(3);
+
         PriceQuoteResponse quote = pricingRuleService.getQuote(
                 params.propertyId(),
-                params.checkIn() != null ? LocalDate.parse(params.checkIn()) : LocalDate.now().plusDays(1),
-                params.checkOut() != null ? LocalDate.parse(params.checkOut()) : LocalDate.now().plusDays(3),
+                checkInDate,
+                checkOutDate,
                 params.couponCode(),
                 userId
         );
 
-        java.util.List<PriceExplanationToolResponse.PriceBreakdownItemDto> items;
-        if (quote.lineItems() != null && !quote.lineItems().isEmpty()) {
-            items = quote.lineItems().stream()
-                    .map(li -> new PriceExplanationToolResponse.PriceBreakdownItemDto(
-                            li.label(),
-                            li.amount() != null ? li.amount().doubleValue() : 0.0))
-                    .toList();
-        } else {
-            items = java.util.List.of(
-                    new PriceExplanationToolResponse.PriceBreakdownItemDto("Base Stay Rate", quote.basePrice() != null ? quote.basePrice().doubleValue() : 0.0)
-            );
+        double total = quote.total() != null ? quote.total().doubleValue() : 0.0;
+        double totalBase = quote.basePrice() != null ? quote.basePrice().doubleValue() : total;
+        int nights = Math.max(1, (int) java.time.temporal.ChronoUnit.DAYS.between(checkInDate, checkOutDate));
+        double baseRate = nights > 0 ? (totalBase / nights) : totalBase;
+
+        double cleaning = 0.0;
+        double service = 0.0;
+        double taxes = 0.0;
+        double discount = 0.0;
+        if (quote.lineItems() != null) {
+            for (PriceLineItem item : quote.lineItems()) {
+                if (item.label() != null) {
+                    String lower = item.label().toLowerCase();
+                    double amt = item.amount() != null ? item.amount().doubleValue() : 0.0;
+                    if (lower.contains("clean")) cleaning += amt;
+                    else if (lower.contains("service")) service += amt;
+                    else if (lower.contains("tax")) taxes += amt;
+                    else if (lower.contains("discount") || lower.contains("coupon")) discount += Math.abs(amt);
+                }
+            }
         }
 
-        double totalAmount = quote.total() != null ? quote.total().doubleValue() : (quote.basePrice() != null ? quote.basePrice().doubleValue() : 0.0);
-        double baseRate = quote.basePrice() != null ? quote.basePrice().doubleValue() : totalAmount;
-
-        PriceExplanationToolResponse resp = new PriceExplanationToolResponse(
+        Response resp = new Response(
                 params.propertyId(),
-                "Price Breakdown & Fees",
-                "€",
                 baseRate,
-                0.0,
-                totalAmount,
-                totalAmount,
-                items
+                nights,
+                totalBase,
+                cleaning,
+                service,
+                taxes,
+                discount,
+                total,
+                "USD",
+                "Standard nightly pricing breakdown"
         );
         return ToolResult.ok(resp);
     }
 
     @Override
     public JsonNode parameterSchema() {
-        return jsonSchemaService.generate(PriceExplanationParams.class);
+        return jsonSchemaService.generate(Params.class);
     }
 
     @Override
     public JsonNode responseSchema() {
-        return jsonSchemaService.generate(PriceExplanationToolResponse.class);
+        return jsonSchemaService.generate(Response.class);
     }
 }
-

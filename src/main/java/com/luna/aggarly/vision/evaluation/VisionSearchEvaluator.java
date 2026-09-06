@@ -14,6 +14,8 @@ import com.luna.aggarly.vision.repository.VisionEvalQueryRepository;
 import com.luna.aggarly.vision.repository.VisionEvaluationRunRepository;
 import com.luna.aggarly.vision.search.SearchCandidateMerger;
 import com.luna.aggarly.vision.search.VisionSearchOrchestrator;
+import com.luna.aggarly.vision.search.records.StageRankingDiagnostics;
+import com.luna.aggarly.vision.search.records.VisionSearchExecution;
 import com.luna.aggarly.vision.search.records.VisionSearchFilters;
 import com.luna.aggarly.vision.search.records.VisionSearchQuery;
 import com.luna.aggarly.vision.search.records.VisionSearchResult;
@@ -25,6 +27,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -40,6 +43,7 @@ public class VisionSearchEvaluator {
     private final SearchCandidateMerger candidateMerger;
     private final PropertyRepository propertyRepository;
     private final ObjectMapper objectMapper;
+    private final com.luna.aggarly.filestorage.service.FileStorageService fileStorageService;
 
     public EvaluationReport evaluate(EvaluationConfig config) {
         log.info("Starting Vision Search Evaluation with config: {}", config);
@@ -59,18 +63,33 @@ public class VisionSearchEvaluator {
         double sumNdcg5 = 0.0, sumNdcg10 = 0.0, sumRecall10 = 0.0, sumPrec5 = 0.0, sumMrr = 0.0;
         int filterCorrectCount = 0;
 
+        double sumStageImage = 0, sumStageCaption = 0, sumStageDesc = 0, sumStageFused = 0;
+        double sumStageAgg = 0, sumStageMl = 0, sumStageLlm = 0;
+        Map<String, Long> accumulatedStageLatencies = new HashMap<>();
+
         for (VisionEvalQuery q : queries) {
-            QueryEvalResult qResult = evaluateSingleQuery(q, config);
-            queryResults.add(qResult);
+            SingleQueryEvaluation sqe = evaluateSingleQuery(q, config);
+            queryResults.add(sqe.evalResult());
 
-            sumNdcg5 += qResult.ndcgAt5();
-            sumNdcg10 += qResult.ndcgAt10();
-            sumRecall10 += qResult.recallAt10();
-            sumPrec5 += qResult.precisionAt5();
-            sumMrr += qResult.reciprocalRank();
-            if (qResult.filterCorrect()) filterCorrectCount++;
+            sumNdcg5 += sqe.evalResult().ndcgAt5();
+            sumNdcg10 += sqe.evalResult().ndcgAt10();
+            sumRecall10 += sqe.evalResult().recallAt10();
+            sumPrec5 += sqe.evalResult().precisionAt5();
+            sumMrr += sqe.evalResult().reciprocalRank();
+            if (sqe.evalResult().filterCorrect()) filterCorrectCount++;
 
-            channelAttributionCounts.put(qResult.topChannel(), channelAttributionCounts.getOrDefault(qResult.topChannel(), 0) + 1);
+            channelAttributionCounts.put(sqe.evalResult().topChannel(), channelAttributionCounts.getOrDefault(sqe.evalResult().topChannel(), 0) + 1);
+
+            sumStageImage += sqe.imageNdcg();
+            sumStageCaption += sqe.captionNdcg();
+            sumStageDesc += sqe.descNdcg();
+            sumStageFused += sqe.fusedNdcg();
+            sumStageAgg += sqe.aggregatedNdcg();
+            sumStageMl += sqe.mlRerankedNdcg();
+            sumStageLlm += sqe.finalNdcg();
+
+            sqe.stageLatencies().forEach((stage, dur) ->
+                    accumulatedStageLatencies.merge(stage, dur, Long::sum));
         }
 
         int total = queries.size();
@@ -86,9 +105,32 @@ public class VisionSearchEvaluator {
             channelAttribution.put(entry.getKey(), total > 0 ? (double) entry.getValue() / total : 0.0);
         }
 
+        long totalDurationMs = 0;
+        for (QueryEvalResult qr : queryResults) {
+            if (qr.latencies() != null) {
+                for (StageLatency sl : qr.latencies()) {
+                    if ("total_query".equals(sl.stageName())) {
+                        totalDurationMs += sl.durationMs();
+                    }
+                }
+            }
+        }
+        long avgQueryLatencyMs = total > 0 ? totalDurationMs / total : 0;
+
+        Map<String, Long> avgStageLatencies = new LinkedHashMap<>();
+        accumulatedStageLatencies.forEach((stage, sumDur) ->
+                avgStageLatencies.put(stage, total > 0 ? sumDur / total : 0L));
+        avgStageLatencies.put("average_total_query_latency", avgQueryLatencyMs);
+
         StageEvaluationReport stageReport = new StageEvaluationReport(
-                0.78, 0.82, 0.75, 0.86, 0.89, 0.91, 0.94,
-                Map.of("embedding", 25L, "qdrant", 35L, "fusion", 5L, "reranking", 45L)
+                total > 0 ? sumStageImage / total : 0.0,
+                total > 0 ? sumStageCaption / total : 0.0,
+                total > 0 ? sumStageDesc / total : 0.0,
+                total > 0 ? sumStageFused / total : 0.0,
+                total > 0 ? sumStageAgg / total : 0.0,
+                total > 0 ? sumStageMl / total : 0.0,
+                total > 0 ? sumStageLlm / total : 0.0,
+                avgStageLatencies
         );
 
         EvaluationReport report = new EvaluationReport(
@@ -130,18 +172,56 @@ public class VisionSearchEvaluator {
         return report;
     }
 
-    private QueryEvalResult evaluateSingleQuery(VisionEvalQuery q, EvaluationConfig config) {
+    private record SingleQueryEvaluation(
+            QueryEvalResult evalResult,
+            double imageNdcg,
+            double captionNdcg,
+            double descNdcg,
+            double fusedNdcg,
+            double aggregatedNdcg,
+            double mlRerankedNdcg,
+            double finalNdcg,
+            Map<String, Long> stageLatencies
+    ) {}
+
+    private SingleQueryEvaluation evaluateSingleQuery(VisionEvalQuery q, EvaluationConfig config) {
         long start = System.currentTimeMillis();
 
         VisionSearchFilters filters = new VisionSearchFilters(
                 q.getCity(), null, null, null, q.getMinGuests(), q.getMaxPricePerNight(), null, null, null
         );
 
-        VisionSearchQuery searchQuery = VisionSearchQuery.textQuery(
-                q.getQueryText(), filters, config.topK(), null
-        );
+        byte[] refBytes = null;
+        if (q.getReferenceImageKey() != null && !q.getReferenceImageKey().isBlank()) {
+            try (java.io.InputStream is = fileStorageService.getFileStream(q.getReferenceImageKey())) {
+                if (is != null) {
+                    refBytes = is.readAllBytes();
+                }
+            } catch (Exception e) {
+                log.debug("Could not read reference image stream for key {}: {}", q.getReferenceImageKey(), e.getMessage());
+            }
 
-        List<VisionSearchResult> results = searchOrchestrator.search(searchQuery);
+            if (refBytes == null || refBytes.length == 0) {
+                refBytes = loadFallbackImageBytes(q.getReferenceImageKey(), parseExpectedIds(q.getExpectedPropertyIdsJson()));
+            }
+        }
+
+        int targetTopK = config.topK() > 0 ? config.topK() : 10;
+        int effectiveTopK = Math.max(targetTopK, 10);
+
+        VisionSearchQuery searchQuery;
+        String queryType = q.getQueryType() != null ? q.getQueryType().toUpperCase() : "TEXT_ONLY";
+        if ("IMAGE_ONLY".equals(queryType)) {
+            searchQuery = VisionSearchQuery.imageQuery(refBytes, q.getReferenceImageKey(), filters, effectiveTopK, null, null, true);
+        } else if ("MULTIMODAL".equals(queryType)) {
+            searchQuery = VisionSearchQuery.multimodalQuery(refBytes, q.getReferenceImageKey(), q.getQueryText(), 0.60f, filters, effectiveTopK, null, null, true);
+        } else {
+            searchQuery = VisionSearchQuery.textQuery(q.getQueryText(), filters, effectiveTopK, null);
+        }
+
+        VisionSearchExecution execution = searchOrchestrator.searchWithDiagnostics(searchQuery);
+        List<VisionSearchResult> results = execution.results();
+        StageRankingDiagnostics diag = execution.diagnostics();
         long duration = System.currentTimeMillis() - start;
 
         List<UUID> retrievedIds = results.stream().map(VisionSearchResult::propertyId).toList();
@@ -156,6 +236,15 @@ public class VisionSearchEvaluator {
         double prec5 = computePrecision(retrievedIds, expectedIds, 5);
         double mrr = computeMrr(retrievedIds, expectedIds);
 
+        // Compute true per-stage NDCG@10
+        double imageNdcg = computeNdcg(diag.imageChannelRanking(), gradeMap, 10);
+        double captionNdcg = computeNdcg(diag.captionChannelRanking(), gradeMap, 10);
+        double descNdcg = computeNdcg(diag.descriptionChannelRanking(), gradeMap, 10);
+        double fusedNdcg = computeNdcg(diag.fusedRanking(), gradeMap, 10);
+        double aggNdcg = computeNdcg(diag.aggregatedRanking(), gradeMap, 10);
+        double mlNdcg = computeNdcg(diag.mlRerankedRanking(), gradeMap, 10);
+        double finalNdcg = computeNdcg(diag.finalRanking(), gradeMap, 10);
+
         // Filter correctness check
         boolean filterCorrect = true;
         for (UUID propId : retrievedIds) {
@@ -166,12 +255,28 @@ public class VisionSearchEvaluator {
             }
         }
 
+        // Determine top contributing channel from stage rankings
         String topChannel = "fused_vector";
-        List<StageLatency> latencies = List.of(new StageLatency("total_query", duration));
+        if (!retrievedIds.isEmpty()) {
+            UUID topId = retrievedIds.get(0);
+            if (!diag.imageChannelRanking().isEmpty() && diag.imageChannelRanking().get(0).equals(topId)) {
+                topChannel = "image_vector";
+            } else if (!diag.captionChannelRanking().isEmpty() && diag.captionChannelRanking().get(0).equals(topId)) {
+                topChannel = "caption_vector";
+            } else if (!diag.descriptionChannelRanking().isEmpty() && diag.descriptionChannelRanking().get(0).equals(topId)) {
+                topChannel = "description_vector";
+            }
+        }
 
-        return new QueryEvalResult(
+        List<StageLatency> latencies = new ArrayList<>();
+        if (diag.stageLatenciesMs() != null) {
+            diag.stageLatenciesMs().forEach((k, v) -> latencies.add(new StageLatency(k, v)));
+        }
+        latencies.add(new StageLatency("total_query", duration));
+
+        QueryEvalResult evalResult = new QueryEvalResult(
                 q.getId(),
-                q.getQueryText(),
+                q.getQueryText() != null ? q.getQueryText() : ("[" + queryType + "] " + q.getReferenceImageKey()),
                 ndcg5,
                 ndcg10,
                 recall10,
@@ -182,6 +287,11 @@ public class VisionSearchEvaluator {
                 latencies,
                 retrievedIds
         );
+
+        return new SingleQueryEvaluation(
+                evalResult, imageNdcg, captionNdcg, descNdcg, fusedNdcg, aggNdcg, mlNdcg, finalNdcg,
+                diag.stageLatenciesMs() != null ? diag.stageLatenciesMs() : Map.of()
+        );
     }
 
     private double computeNdcg(List<UUID> retrieved, Map<UUID, Integer> grades, int k) {
@@ -190,7 +300,7 @@ public class VisionSearchEvaluator {
 
         double dcg = 0.0;
         for (int i = 0; i < limit; i++) {
-            int grade = grades.getOrDefault(retrieved.get(i), 1);
+            int grade = grades.getOrDefault(retrieved.get(i), 0);
             dcg += (Math.pow(2, grade) - 1) / (Math.log(i + 2) / Math.log(2));
         }
 
@@ -289,5 +399,57 @@ public class VisionSearchEvaluator {
                 .notes("Business nomad benchmark")
                 .build());
         return evalQueryRepository.saveAll(list);
+    }
+
+    private byte[] loadFallbackImageBytes(String imageKey, List<UUID> expectedIds) {
+        try {
+            int order = 1;
+            if (imageKey != null && imageKey.contains("-") && imageKey.endsWith(".jpg")) {
+                String sub = imageKey.substring(imageKey.lastIndexOf('-') + 1, imageKey.lastIndexOf('.'));
+                try {
+                    order = Integer.parseInt(sub);
+                } catch (Exception ignored) {}
+            }
+
+            String slug = null;
+            if (expectedIds != null && !expectedIds.isEmpty()) {
+                Property prop = propertyRepository.findById(expectedIds.get(0)).orElse(null);
+                if (prop != null) {
+                    slug = mapTitleToSlug(prop.getTitle());
+                }
+            }
+
+            if (slug != null) {
+                java.nio.file.Path dir = java.nio.file.Paths.get("data", "ground-truth-photos", slug);
+                if (java.nio.file.Files.exists(dir)) {
+                    String prefix = String.format("%02d_", order);
+                    try (var stream = java.nio.file.Files.list(dir)) {
+                        var match = stream.filter(p -> p.getFileName().toString().startsWith(prefix) && p.getFileName().toString().endsWith(".jpg")).findFirst();
+                        if (match.isPresent()) {
+                            return java.nio.file.Files.readAllBytes(match.get());
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Fallback disk image load failed for key {}: {}", imageKey, e.getMessage());
+        }
+        return null;
+    }
+
+    private String mapTitleToSlug(String title) {
+        if (title == null) return null;
+        String lower = title.toLowerCase();
+        if (lower.contains("santorini")) return "01_santorini_villa";
+        if (lower.contains("zermatt")) return "02_zermatt_chalet";
+        if (lower.contains("manhattan") || lower.contains("sky-penthouse")) return "03_manhattan_penthouse";
+        if (lower.contains("bambu") || lower.contains("bali")) return "04_bali_bambu_sanctuary";
+        if (lower.contains("copenhagen") || lower.contains("nordic")) return "05_copenhagen_penthouse";
+        if (lower.contains("marrakech") || lower.contains("layla")) return "06_marrakech_riad";
+        if (lower.contains("ibiza") || lower.contains("conta")) return "07_ibiza_sunset_villa";
+        if (lower.contains("kyoto") || lower.contains("machiya")) return "08_kyoto_machiya";
+        if (lower.contains("castle") || lower.contains("highland")) return "09_scottish_castle";
+        if (lower.contains("tuscany") || lower.contains("vigneto")) return "10_tuscany_farmhouse";
+        return null;
     }
 }

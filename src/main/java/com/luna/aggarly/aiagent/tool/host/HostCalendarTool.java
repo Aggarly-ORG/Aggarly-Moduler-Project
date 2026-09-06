@@ -13,9 +13,9 @@ import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
-public class HostCalendarTool implements Tool<HostCalendarTool.HostCalendarRequest, String> {
+public class HostCalendarTool implements Tool<HostCalendarTool.Params, String> {
 
-    public record HostCalendarRequest(
+    public record Params(
             UUID propertyId,
             LocalDate startDate,
             LocalDate endDate,
@@ -35,8 +35,8 @@ public class HostCalendarTool implements Tool<HostCalendarTool.HostCalendarReque
     }
 
     @Override
-    public Class<HostCalendarRequest> parameterType() {
-        return HostCalendarRequest.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -50,7 +50,7 @@ public class HostCalendarTool implements Tool<HostCalendarTool.HostCalendarReque
     }
 
     @Override
-    public ToolResult<String> execute(HostCalendarRequest params, UserPrincipal user) {
+    public ToolResult<String> execute(Params params, UserPrincipal user) {
         availabilityService.blockDates(params.propertyId(), new BlockDatesRequest(params.startDate(), params.endDate(), params.reason()));
         return ToolResult.ok("Dates successfully blocked from " + params.startDate() + " to " + params.endDate());
     }

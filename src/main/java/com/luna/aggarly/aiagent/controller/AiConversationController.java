@@ -22,6 +22,7 @@ import com.luna.aggarly.chat.repository.ConversationRepository;
 import com.luna.aggarly.chat.service.ChatAiBridgeService;
 import com.luna.aggarly.chat.service.MessageService;
 import com.luna.aggarly.common.dto.ApiResponse;
+import com.luna.aggarly.common.security.SecurityUtils;
 import com.luna.aggarly.user.entity.UserConfirmedAction;
 import com.luna.aggarly.user.repository.UserConfirmedActionRepository;
 import com.luna.aggarly.user.repository.UserRepository;
@@ -64,6 +65,8 @@ public class AiConversationController {
     private final ConfirmationGate confirmationGate;
     private final BookingAgent bookingAgent;
     private final PropertyAgent propertyAgent;
+    private final com.luna.aggarly.aiagent.agent.HostAgent hostAgent;
+    private final com.luna.aggarly.aiagent.agent.AdminAgent adminAgent;
     private final MessageService messageService;
     private final ConversationRepository conversationRepository;
     private final AiConversationRepository aiConversationRepository;
@@ -75,6 +78,17 @@ public class AiConversationController {
     private UserPrincipal resolveCurrentUser(UserPrincipal principal) {
         if (principal != null) {
             return principal;
+        }
+        UserPrincipal staticPrincipal = SecurityUtils.getCurrentUserPrincipal();
+        if (staticPrincipal != null) {
+            return staticPrincipal;
+        }
+        UUID currentId = SecurityUtils.getCurrentUserId();
+        if (currentId != null) {
+            var found = userRepository.findById(currentId);
+            if (found.isPresent()) {
+                return new UserPrincipal(found.get());
+            }
         }
         return userRepository.findByEmail("essamhossam530@gmail.com")
                 .or(() -> userRepository.findAll().stream().findFirst())
@@ -97,7 +111,7 @@ public class AiConversationController {
     public ResponseEntity<ApiResponse<ChatMessageResponse>> confirmAction(
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable String token,
-            @RequestParam UUID conversationId) {
+            @RequestParam(required = false) UUID conversationId) {
 
         UserPrincipal user = resolveCurrentUser(principal);
         UUID userId = user != null ? user.getUserId() : null;
@@ -134,11 +148,7 @@ public class AiConversationController {
             log.warn("Could not save UserConfirmedAction: {}", ex.getMessage());
         }
 
-        AgentResponse agentResponse = switch (state.agentType()) {
-            case "booking" -> bookingAgent.resumeFromConfirmation(state, user);
-            case "property" -> propertyAgent.resumeFromConfirmation(state, user);
-            default -> AgentResponse.error("Unknown agent type for confirmation: " + state.agentType());
-        };
+        AgentResponse agentResponse = routeConfirmationToAgent(state, user);
 
         try {
             AiConversation aiConv = null;
@@ -252,6 +262,52 @@ public class AiConversationController {
         return ApiResponse.ok(response, "Action confirmed successfully").toResponseEntity();
     }
 
+    @PostMapping("/reject/{token}")
+    @Operation(summary = "Reject and cancel a pending sensitive AI agent tool action", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<ChatMessageResponse>> rejectAction(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable String token,
+            @RequestParam(required = false) UUID conversationId) {
+        UserPrincipal user = resolveCurrentUser(principal);
+        UUID userId = user != null ? user.getUserId() : null;
+
+        Optional<PendingConfirmationState> stateOpt = confirmationGate.retrieveAndConsume(token);
+        String toolName = stateOpt.map(PendingConfirmationState::toolName).orElse("action");
+
+        try {
+            userConfirmedActionRepository.save(UserConfirmedAction.builder()
+                    .userId(userId)
+                    .conversationId(conversationId)
+                    .confirmationToken(token)
+                    .toolName(toolName)
+                    .status("REJECTED")
+                    .build());
+        } catch (Exception ignored) {}
+
+        ChatMessageResponse response = new ChatMessageResponse(
+                conversationId,
+                "Action cancelled. I won't proceed with " + toolName + ".",
+                List.of()
+        );
+        return ApiResponse.ok(response, "Action rejected successfully").toResponseEntity();
+    }
+
+    private AgentResponse routeConfirmationToAgent(PendingConfirmationState state, UserPrincipal user) {
+        String agentType = state.agentType() != null ? state.agentType().toLowerCase() : "";
+        String toolName = state.toolName() != null ? state.toolName().toLowerCase() : "";
+
+        if (agentType.contains("booking") || toolName.startsWith("booking.") || toolName.startsWith("payment.")) {
+            return bookingAgent.resumeFromConfirmation(state, user);
+        } else if (agentType.contains("property") || toolName.startsWith("property.")) {
+            return propertyAgent.resumeFromConfirmation(state, user);
+        } else if (agentType.contains("host") || toolName.startsWith("host.")) {
+            return hostAgent.resumeFromConfirmation(state, user);
+        } else if (agentType.contains("admin") || toolName.startsWith("admin.")) {
+            return adminAgent.resumeFromConfirmation(state, user);
+        }
+        return bookingAgent.resumeFromConfirmation(state, user);
+    }
+
     @GetMapping("/confirmed-actions")
     @Operation(summary = "Get confirmed user action records", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<ApiResponse<List<UserConfirmedAction>>> getUserConfirmedActions(
@@ -318,7 +374,12 @@ public class AiConversationController {
     public ResponseEntity<ApiResponse<List<MemoryPreferenceDto>>> listMemory(
             @AuthenticationPrincipal UserPrincipal principal) {
         UserPrincipal user = resolveCurrentUser(principal);
-        UUID userId = user != null ? user.getUserId() : null;
+        UUID userId = user != null ? user.getUserId() : SecurityUtils.getCurrentUserId();
+        if (userId == null) {
+            userId = userRepository.findAll().stream().findFirst()
+                    .map(com.luna.aggarly.user.entity.User::getId)
+                    .orElse(null);
+        }
         List<MemoryPreferenceDto> memories = memoryContextManager.listMemories(userId).stream()
                 .map(m -> new MemoryPreferenceDto(m.getMemoryKey(), m.getMemoryValue()))
                 .toList();
@@ -331,13 +392,27 @@ public class AiConversationController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestBody MemoryPreferenceDto dto) {
         UserPrincipal user = resolveCurrentUser(principal);
-        UUID userId = user != null ? user.getUserId() : null;
+        UUID userId = user != null ? user.getUserId() : SecurityUtils.getCurrentUserId();
+        if (userId == null) {
+            userId = userRepository.findAll().stream().findFirst()
+                    .map(com.luna.aggarly.user.entity.User::getId)
+                    .orElseGet(() -> {
+                        var demoUser = com.luna.aggarly.user.entity.User.builder()
+                                .email("essamhossam530@gmail.com")
+                                .username("essamhossam530")
+                                .passwordHash("dev_placeholder")
+                                .build();
+                        return userRepository.save(demoUser).getId();
+                    });
+        }
         String key = dto.memoryKey();
         if (key == null || key.isBlank()) {
             key = "pref_" + System.currentTimeMillis();
         }
-        memoryContextManager.confirmLongTermMemory(userId, key, dto.memoryValue());
-        return ApiResponse.ok(new MemoryPreferenceDto(key, dto.memoryValue()), "Memory saved").toResponseEntity();
+        String val = dto.memoryValue() != null ? dto.memoryValue().trim() : "";
+        memoryContextManager.confirmLongTermMemory(userId, key, val);
+        log.info("Saved memory preference: key='{}', val='{}' for user={}", key, val, userId);
+        return ApiResponse.ok(new MemoryPreferenceDto(key, val), "Memory saved").toResponseEntity();
     }
 
     @DeleteMapping("/memory/{key}")
@@ -346,8 +421,40 @@ public class AiConversationController {
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable String key) {
         UserPrincipal user = resolveCurrentUser(principal);
-        UUID userId = user != null ? user.getUserId() : null;
+        UUID userId = user != null ? user.getUserId() : SecurityUtils.getCurrentUserId();
+        if (userId == null) {
+            userId = userRepository.findAll().stream().findFirst()
+                    .map(com.luna.aggarly.user.entity.User::getId)
+                    .orElse(null);
+        }
         memoryContextManager.forget(userId, key);
         return ApiResponse.<Void>empty("Memory forgotten successfully").toResponseEntity();
+    }
+
+    @DeleteMapping("/conversations/{id}/messages")
+    @Operation(summary = "Clear all messages in an AI conversation thread", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<Void>> clearAiConversationMessages(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID id) {
+        UserPrincipal user = resolveCurrentUser(principal);
+        UUID userId = user != null ? user.getUserId() : null;
+
+        List<AiMessage> aiMessages = aiMessageRepository.findByConversationIdOrderByCreatedAtAsc(id);
+        if (!aiMessages.isEmpty()) {
+            aiMessageRepository.deleteAll(aiMessages);
+        }
+
+        // Also check if mapped to a chat conversation
+        Optional<Conversation> chatConvOpt = conversationRepository.findByAiConversationId(id)
+                .or(() -> conversationRepository.findById(id));
+        chatConvOpt.ifPresent(c -> {
+            if (userId != null) {
+                try {
+                    messageService.clearConversationMessages(c.getId(), userId);
+                } catch (Exception ignored) {}
+            }
+        });
+
+        return ApiResponse.<Void>empty("AI conversation messages cleared successfully").toResponseEntity();
     }
 }

@@ -1,6 +1,6 @@
 # ===================================================================
 # Aggarly — Property Rental Platform
-# Docker Compose for local development
+# Docker Compose for local development & deployment
 # ===================================================================
 # Usage:
 #   docker compose up -d          (start all services)
@@ -99,6 +99,27 @@ services:
       - '1025:1025'   # SMTP
       - '8025:8025'   # Web UI (view caught emails)
     restart: unless-stopped
+
+  # ========================
+  # OpenCLIP Neural Embedding Microservice
+  # ========================
+#  clip-service:
+#    build:
+#      context: ./ml-services/clip-service
+#      dockerfile: Dockerfile
+#    container_name: aggarly-clip-service
+#    ports:
+#      - '8000:8000'
+#    environment:
+#      - CLIP_MODEL_NAME=ViT-B-32
+#      - CLIP_PRETRAINED=laion2b_s34b_b79k
+#      - PORT=8000
+#    healthcheck:
+#      test: [ "CMD-SHELL", "curl -f http://localhost:8000/health || exit 1" ]
+#      interval: 15s
+#      timeout: 5s
+#      retries: 3
+#    restart: unless-stopped
 
 volumes:
   postgres_data:

@@ -86,6 +86,32 @@ public class VisionSearchController {
         return ApiResponse.ok(response, "Multimodal visual search completed").toResponseEntity();
     }
 
+    @PostMapping(value = "/upload", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Search by uploaded image file directly (Public)")
+    public ResponseEntity<ApiResponse<VisionSearchResponse>> searchByImageUpload(
+            @RequestParam("file") org.springframework.web.multipart.MultipartFile file,
+            @RequestParam(value = "textQuery", required = false) String textQuery,
+            @RequestParam(value = "city", required = false) String city,
+            @RequestParam(value = "country", required = false) String country,
+            @RequestParam(value = "minGuests", required = false) Integer minGuests,
+            @RequestParam(value = "maxPricePerNight", required = false) Double maxPricePerNight,
+            @RequestParam(value = "requiredScenes", required = false) List<String> requiredScenes,
+            @RequestParam(value = "pageSize", required = false, defaultValue = "10") int pageSize) throws Exception {
+
+        byte[] bytes = file.getBytes();
+        var filters = new com.luna.aggarly.vision.search.records.VisionSearchFilters(
+                city, country, null, null, minGuests, maxPricePerNight, null, requiredScenes, null
+        );
+
+        VisionSearchQuery query = (textQuery != null && !textQuery.isBlank())
+                ? VisionSearchQuery.multimodalQuery(bytes, null, textQuery, 0.60f, filters, pageSize, null, 0.25f)
+                : VisionSearchQuery.imageQuery(bytes, null, filters, pageSize, null, 0.25f);
+
+        List<VisionSearchResult> results = searchOrchestrator.search(query);
+        VisionSearchResponse response = new VisionSearchResponse(results, results.size(), null);
+        return ApiResponse.ok(response, "Visual upload search completed").toResponseEntity();
+    }
+
     @GetMapping("/similar/{propertyId}")
     @Operation(summary = "Find visually similar properties to an existing listing (Public)")
     public ResponseEntity<ApiResponse<VisionSearchResponse>> searchSimilarToProperty(

@@ -3,6 +3,7 @@ package com.luna.aggarly.aiagent.tool.vision;
 import com.luna.aggarly.aiagent.engine.MemoryContextManager;
 import com.luna.aggarly.aiagent.tool.Tool;
 import com.luna.aggarly.aiagent.tool.ToolResult;
+import com.luna.aggarly.common.security.SecurityUtils;
 import com.luna.aggarly.user.security.UserPrincipal;
 import com.luna.aggarly.vision.search.VisualPreferenceExtractor;
 import lombok.RequiredArgsConstructor;
@@ -46,22 +47,26 @@ public class VisionExtractVisualPreferencesTool implements Tool<VisionExtractVis
 
     @Override
     public ToolResult<VisualPreferenceExtractor.ExtractedPreferences> execute(Params params, UserPrincipal currentUser) {
-        UUID userId = currentUser != null ? currentUser.getUserId() : UUID.randomUUID();
+        UUID userId = currentUser != null ? currentUser.getUserId() : SecurityUtils.getCurrentUserId();
+        if (userId == null) {
+            userId = UUID.randomUUID();
+        }
         log.info("Executing tool vision.extractVisualPreferences for userId={}", userId);
 
         VisualPreferenceExtractor.ExtractedPreferences extracted = preferenceExtractor.extractPreferencesFromImage(
                 params.referenceObjectKey(), userId
         );
 
-        if (params.saveAsMemory() && currentUser != null) {
+        if (params.saveAsMemory()) {
             try {
                 memoryContextManager.confirmLongTermMemory(
                         userId,
                         "VISUAL_PREFERENCE",
                         extracted.naturalLanguageSummary()
                 );
+                log.info("Persisted visual preference to long-term memory for userId={}", userId);
             } catch (Exception e) {
-                log.debug("Memory persistence note: {}", e.getMessage());
+                log.warn("Failed to persist visual memory: {}", e.getMessage());
             }
         }
 

@@ -1,5 +1,6 @@
 package com.luna.aggarly.vision.vector;
 
+import com.luna.aggarly.vision.client.ClipServiceClient;
 import com.luna.aggarly.vision.pipeline.OllamaVisionClient;
 import com.luna.aggarly.vision.pipeline.PerceptualHashService;
 import com.luna.aggarly.vision.pipeline.VisionCacheService;
@@ -11,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -21,8 +23,8 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * Multi-modal embedding service supporting live Ollama / Spring AI models with intelligent
- * domain-aware token & n-gram semantic vectorization fallback.
+ * Multi-modal embedding service supporting live Python OpenCLIP neural microservice,
+ * Ollama neural embeddings, Spring AI models, with orthogonal visual projection fallback.
  */
 @Slf4j
 @Service
@@ -32,6 +34,7 @@ public class MultimodalEmbeddingService {
     private final VisionCacheService cacheService;
     private final OllamaVisionClient ollamaVisionClient;
     private final PerceptualHashService perceptualHashService;
+    private final ClipServiceClient clipServiceClient;
 
     @Autowired(required = false)
     private EmbeddingModel embeddingModel;
@@ -43,7 +46,7 @@ public class MultimodalEmbeddingService {
             "a", "an", "the", "in", "on", "at", "to", "for", "of", "and", "or", "with",
             "is", "are", "was", "were", "by", "as", "it", "this", "that", "from", "be",
             "has", "have", "had", "featuring", "overlooking", "features", "its", "into",
-            "featuring", "small", "large", "colorful", "during", "all", "very"
+            "small", "large", "colorful", "during", "all", "very"
     ));
 
     private static final Set<String> CORE_DOMAIN_KEYWORDS = new HashSet<>(Arrays.asList(
@@ -52,7 +55,16 @@ public class MultimodalEmbeddingService {
             "sunset", "terrace", "jacuzzi", "wifi", "workspace", "mountain", "garden"
     ));
 
+    /**
+     * Embeds an image.
+     * Tier 1: True neural vision embeddings via Python OpenCLIP Microservice (ViT-B-32).
+     * Tier 2 Fallback: Orthogonal perceptual hash projection.
+     */
     public float[] embedImage(byte[] imageBytes, String pHash) {
+        return embedImage(imageBytes, pHash, false);
+    }
+
+    public float[] embedImage(byte[] imageBytes, String pHash, boolean forceRefresh) {
         String effectiveHash = pHash;
         if ((effectiveHash == null || effectiveHash.isBlank()) && imageBytes != null && imageBytes.length > 0) {
             try {
@@ -60,18 +72,71 @@ public class MultimodalEmbeddingService {
             } catch (Exception ignored) {}
         }
 
-        if (effectiveHash != null && !effectiveHash.isBlank()) {
-            var cached = cacheService.getCachedImageEmbedding(effectiveHash);
+        String activeModel = getActiveEmbeddingModelName();
+
+        if (!forceRefresh && effectiveHash != null && !effectiveHash.isBlank()) {
+            var cached = cacheService.getCachedImageEmbedding(activeModel, effectiveHash);
             if (cached.isPresent()) {
                 return cached.get();
             }
         }
 
-        float[] vector = generateVectorFromText("image_phash " + (effectiveHash != null ? effectiveHash : ""));
+        // Tier 1: Call Python OpenCLIP Microservice
+        if (imageBytes != null && imageBytes.length > 0 && clipServiceClient != null && clipServiceClient.isAvailable()) {
+            try {
+                var clipVecOpt = clipServiceClient.embedImage(imageBytes);
+                if (clipVecOpt.isPresent() && clipVecOpt.get().length > 0) {
+                    float[] normalized = matchDimensionAndNormalize(clipVecOpt.get());
+                    if (effectiveHash != null && !effectiveHash.isBlank()) {
+                        cacheService.cacheImageEmbedding(activeModel, effectiveHash, normalized);
+                    }
+                    return normalized;
+                }
+            } catch (Exception e) {
+                log.warn("OpenCLIP microservice call failed, falling back to perceptual projection: {}", e.getMessage());
+            }
+        }
+
+        // Tier 2: Mathematical Orthogonal Perceptual Projection Fallback
+        float[] vector = projectPerceptualHashToVector(effectiveHash);
         if (effectiveHash != null && !effectiveHash.isBlank()) {
-            cacheService.cacheImageEmbedding(effectiveHash, vector);
+            cacheService.cacheImageEmbedding(activeModel, effectiveHash, vector);
         }
         return vector;
+    }
+
+    public String getActiveEmbeddingModelName() {
+        if (clipServiceClient != null && clipServiceClient.isAvailable()) {
+            return "openclip-" + clipServiceClient.getActiveModelName().toLowerCase().replace('/', '_');
+        }
+        return "openclip-vit-b-32";
+    }
+
+    /**
+     * Converts a 64-bit perceptual hash into a unit-normalized 768-dimensional orthogonal vector.
+     */
+    public float[] projectPerceptualHashToVector(String hexHash) {
+        float[] vec = new float[vectorDim];
+        if (hexHash == null || hexHash.isBlank()) {
+            return vec;
+        }
+
+        long hashBits = 0L;
+        try {
+            hashBits = new BigInteger(hexHash.trim(), 16).longValue();
+        } catch (Exception e) {
+            hashBits = hexHash.hashCode();
+        }
+
+        for (int i = 0; i < vectorDim; i++) {
+            int bitIdx = i % 64;
+            int bit = (int) ((hashBits >>> bitIdx) & 1L);
+            float sign = (bit == 1) ? 1.0f : -1.0f;
+            int octave = i / 64;
+            vec[i] = sign * (float) Math.cos((octave * 0.5235f) + (bitIdx * 0.0981f));
+        }
+
+        return normalizeVector(vec);
     }
 
     public float[] embedCaption(String aiCaption, String altText, String visualSummary) {
@@ -106,7 +171,19 @@ public class MultimodalEmbeddingService {
             return new float[vectorDim];
         }
 
-        // 1. Try Ollama direct embedding first
+        // Tier 1: Try Python OpenCLIP Microservice for shared multimodal latent space
+        if (clipServiceClient != null && clipServiceClient.isAvailable()) {
+            try {
+                var clipTextVec = clipServiceClient.embedText(textQuery);
+                if (clipTextVec.isPresent() && clipTextVec.get().length > 0) {
+                    return matchDimensionAndNormalize(clipTextVec.get());
+                }
+            } catch (Exception e) {
+                log.debug("OpenCLIP text embedding call failed: {}", e.getMessage());
+            }
+        }
+
+        // Tier 2: Try Ollama direct embedding
         if (ollamaVisionClient != null && ollamaVisionClient.isAvailable()) {
             try {
                 var ollamaVec = ollamaVisionClient.getEmbedding(textQuery, null);
@@ -118,7 +195,7 @@ public class MultimodalEmbeddingService {
             }
         }
 
-        // 2. Try Spring AI EmbeddingModel
+        // Tier 3: Try Spring AI EmbeddingModel
         if (embeddingModel != null) {
             try {
                 EmbeddingResponse response = embeddingModel.embedForResponse(List.of(textQuery));
@@ -133,7 +210,7 @@ public class MultimodalEmbeddingService {
             }
         }
 
-        // 3. Fallback: Domain-aware token-level semantic vectorizer
+        // Tier 4: Fallback: Domain-aware token-level semantic vectorizer
         return generateVectorFromText(textQuery);
     }
 
@@ -226,7 +303,7 @@ public class MultimodalEmbeddingService {
         return normalizeVector(vec);
     }
 
-    private float[] normalizeVector(float[] vec) {
+    public float[] normalizeVector(float[] vec) {
         float norm = 0.0f;
         for (float v : vec) {
             norm += v * v;

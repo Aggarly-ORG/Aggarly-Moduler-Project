@@ -11,7 +11,11 @@ import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
-public class UserVerificationStatusTool implements Tool<UUID, Map<String, Object>> {
+public class UserVerificationStatusTool implements Tool<UserVerificationStatusTool.Params, Map<String, Object>> {
+
+    public record Params(
+            UUID userId
+    ) {}
 
     @Override
     public String name() {
@@ -24,8 +28,8 @@ public class UserVerificationStatusTool implements Tool<UUID, Map<String, Object
     }
 
     @Override
-    public Class<UUID> parameterType() {
-        return UUID.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -34,8 +38,10 @@ public class UserVerificationStatusTool implements Tool<UUID, Map<String, Object
     }
 
     @Override
-    public ToolResult<Map<String, Object>> execute(UUID userId, UserPrincipal user) {
-        UUID targetId = userId != null ? userId : (user != null ? user.getUserId() : null);
+    public ToolResult<Map<String, Object>> execute(Params params, UserPrincipal user) {
+        UUID targetId = (params != null && params.userId() != null)
+                ? params.userId()
+                : (user != null ? user.getUserId() : null);
         return ToolResult.ok(Map.of(
                 "userId", targetId != null ? targetId.toString() : "unknown",
                 "emailVerified", true,

@@ -11,14 +11,26 @@ public class PhoneValidator implements ConstraintValidator<ValidPhone,String> {
 
     @Override
     public boolean isValid(String value, ConstraintValidatorContext context) {
-        if(value==null || value.isBlank())
-            return false;
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        String cleaned = value.trim();
         try {
-            Phonenumber.PhoneNumber phoneNumber = phoneNumberUtil.parse(value, null);
-            return phoneNumberUtil.isValidNumber(phoneNumber);
-        }
-        catch (NumberParseException ex) {
-            return false;
-        }
+            Phonenumber.PhoneNumber phoneNumber = phoneNumberUtil.parse(
+                    cleaned.startsWith("+") ? cleaned : "+" + cleaned, null
+            );
+            if (phoneNumberUtil.isValidNumber(phoneNumber)) {
+                return true;
+            }
+        } catch (NumberParseException ignored) {}
+
+        try {
+            Phonenumber.PhoneNumber phoneNumber = phoneNumberUtil.parse(cleaned, "EG");
+            if (phoneNumberUtil.isValidNumber(phoneNumber)) {
+                return true;
+            }
+        } catch (NumberParseException ignored) {}
+
+        return cleaned.matches("^\\+?[0-9\\s\\-\\(\\)]{7,20}$");
     }
 }

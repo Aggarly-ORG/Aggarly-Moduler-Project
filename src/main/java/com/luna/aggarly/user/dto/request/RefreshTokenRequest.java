@@ -6,6 +6,5 @@ public record RefreshTokenRequest(
     @NotBlank(message = "Refresh token is required")
     String refreshToken,
 
-    @NotBlank(message = "Expired access token is required to verify session binding")
     String expiredAccessToken
 ) {}

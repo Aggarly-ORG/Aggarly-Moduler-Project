@@ -10,7 +10,11 @@ import java.util.List;
 
 @Component
 @RequiredArgsConstructor
-public class AttractionsTool implements Tool<String, List<String>> {
+public class AttractionsTool implements Tool<AttractionsTool.Params, List<String>> {
+
+    public record Params(
+            String location
+    ) {}
 
     @Override
     public String name() {
@@ -23,8 +27,8 @@ public class AttractionsTool implements Tool<String, List<String>> {
     }
 
     @Override
-    public Class<String> parameterType() {
-        return String.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -33,7 +37,7 @@ public class AttractionsTool implements Tool<String, List<String>> {
     }
 
     @Override
-    public ToolResult<List<String>> execute(String location, UserPrincipal user) {
+    public ToolResult<List<String>> execute(Params params, UserPrincipal user) {
         return ToolResult.ok(List.of(
                 "Historical Cathedral & Plaza",
                 "Metropolitan Fine Art Museum",

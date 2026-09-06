@@ -48,7 +48,7 @@ public class MemoryContextManager {
             }
         }
 
-        return new ConversationContext(searchContext, memories, history);
+        return new ConversationContext(conversationId, searchContext, memories, history);
     }
 
     public void updateContext(UUID conversationId, AgentResponse response) {
@@ -62,21 +62,46 @@ public class MemoryContextManager {
     }
 
     public void confirmLongTermMemory(UUID userId, String key, String value) {
-        log.info("Confirming long-term memory key={} for userId={}", key, userId);
-        AiUserMemory memory = userMemoryRepository.findByUserIdAndMemoryKey(userId, key)
-                .orElse(AiUserMemory.builder().userId(userId).memoryKey(key).build());
-        memory.setMemoryValue(value);
+        if (userId == null) {
+            log.warn("Cannot confirm long-term memory with null userId");
+            return;
+        }
+        String safeKey = key != null && !key.isBlank() ? key.trim() : "pref_" + System.currentTimeMillis();
+        String safeValue = value != null ? value.trim() : "";
+        log.info("Confirming long-term memory key={} for userId={}", safeKey, userId);
+        AiUserMemory memory = userMemoryRepository.findByUserIdAndMemoryKey(userId, safeKey)
+                .orElse(AiUserMemory.builder().userId(userId).memoryKey(safeKey).build());
+        memory.setMemoryValue(safeValue);
         memory.setUserConfirmed(true);
         userMemoryRepository.save(memory);
     }
 
     public void forget(UUID userId, String key) {
-        log.info("Forgetting memory key={} for userId={}", key, userId);
-        userMemoryRepository.findByUserIdAndMemoryKey(userId, key)
+        if (userId == null || key == null) return;
+        String safeKey = key.trim();
+        log.info("Forgetting memory key={} for userId={}", safeKey, userId);
+        userMemoryRepository.findByUserIdAndMemoryKeyIgnoreCase(userId, safeKey)
                 .ifPresent(userMemoryRepository::delete);
     }
 
     public List<AiUserMemory> listMemories(UUID userId) {
-        return userMemoryRepository.findByUserIdAndUserConfirmedTrue(userId);
+        if (userId == null) return List.of();
+        List<AiUserMemory> confirmed = userMemoryRepository.findByUserIdAndUserConfirmedTrue(userId);
+        if (!confirmed.isEmpty()) {
+            return confirmed;
+        }
+        return userMemoryRepository.findByUserId(userId);
+    }
+
+    public void clearAiContext(UUID conversationId) {
+        if (conversationId != null) {
+            log.info("Clearing AI context messages & search state for conversationId={}", conversationId);
+            var aiMessages = messageRepository.findByConversationIdOrderByCreatedAtAsc(conversationId);
+            if (!aiMessages.isEmpty()) {
+                messageRepository.deleteAll(aiMessages);
+            }
+            searchContextRepository.findByConversationId(conversationId)
+                    .ifPresent(searchContextRepository::delete);
+        }
     }
 }

@@ -19,22 +19,17 @@ import com.luna.aggarly.common.security.SecurityUtils;
 import com.luna.aggarly.user.security.UserPrincipal;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
+@Slf4j
 @Component
 public class VisionAgent implements Agent {
 
-    private static final Logger log = LoggerFactory.getLogger(VisionAgent.class);
     private static final int MAX_AGENT_TURNS = 5;
 
     private static final String VISION_AGENT_SYSTEM_PROMPT = """
@@ -62,29 +57,41 @@ public class VisionAgent implements Agent {
           "blocks": [
             {
               "type": "text",
-              "content": "\\"An evocative opening quote summarizing the visual aesthetic.\\"\\n\\nHelpful concierge narrative explaining the visual findings."
+              "content": "\"An evocative opening quote summarizing the visual aesthetic.\"\n\nHelpful concierge narrative explaining the visual findings."
             }
           ]
         }
+
+        ================================================================
+        RUNTIME EXPRESSION INJECTION & DYNAMIC FUNCTIONS
+        ================================================================
+        When invoking tools, you have access to Aggarly's Runtime Expression Engine.
+        All tool arguments are dynamically pre-evaluated through the expression engine before execution!
+        You can use:
+        - Root Object & Context: {{obj.<field>}}, {{user.id}}, {{current_conversation()}}, {{origin_channel()}}
+        - Date Functions: {{today()}}, {{now()}}, {{date_add(today(), 3, 'DAYS')}}, {{date_sub(today(), 1, 'MONTHS')}}, {{format_date(today(), 'yyyy-MM-dd')}}
+        - Entity Lookups: {{property('<id>').title}}, {{booking('<id>').status}}, {{user('<id>').email}}
+        - String & Math Utilities: {{upper(str)}}, {{format_currency(amount, 'USD')}}, {{join(list, ', ')}}, {{first(list)}}, {{coalesce(a, b)}}, {{ternary(cond, trueVal, falseVal)}}
         """;
 
     private final LlmClient llmClient;
     private final ConfirmationGate confirmationGate;
     private final ObjectMapper objectMapper;
     private final Validator validator;
+    private final com.luna.aggarly.common.expression.ExpressionEngine expressionEngine;
     private final Map<String, Tool<?, ?>> toolRegistry = new HashMap<>();
 
     public static final Set<String> SUPPORTED_TOOLS = Set.of(
-            "vision.searchByText",
-            "vision.searchByImage",
-            "vision.searchMultimodal",
+            "vision.search",
             "vision.compareProperties",
             "vision.getPropertyVisualProfile",
             "vision.getImageMetadata",
             "vision.extractVisualPreferences",
             "vision.analyzeReferenceImage",
-            "vision.searchSimilarToProperty"
+            "vision.getPhotoTour"
     );
+
+    private final com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher activityPublisher;
 
     @Autowired
     public VisionAgent(
@@ -92,17 +99,24 @@ public class VisionAgent implements Agent {
             ConfirmationGate confirmationGate,
             ObjectMapper objectMapper,
             Validator validator,
-            List<Tool<?, ?>> tools
+            @Autowired(required = false) com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher activityPublisher,
+            @Autowired(required = false) com.luna.aggarly.common.expression.ExpressionEngine expressionEngine,
+            @Qualifier("toolRegistry") Map<String, Tool<?, ?>> sharedToolRegistry
     ) {
         this.llmClient = llmClient;
         this.confirmationGate = confirmationGate;
         this.objectMapper = objectMapper;
         this.validator = validator;
+        this.activityPublisher = activityPublisher;
+        this.expressionEngine = expressionEngine;
 
-        if (tools != null) {
-            for (Tool<?, ?> tool : tools) {
-                if (SUPPORTED_TOOLS.contains(tool.name())) {
-                    this.toolRegistry.put(tool.name(), tool);
+        if (sharedToolRegistry != null) {
+            for (String toolName : SUPPORTED_TOOLS) {
+                Tool<?, ?> tool = sharedToolRegistry.get(toolName);
+                if (tool != null) {
+                    this.toolRegistry.put(toolName, tool);
+                } else {
+                    log.warn("VisionAgent: declared tool '{}' has no registered implementation", toolName);
                 }
             }
         }
@@ -147,19 +161,54 @@ public class VisionAgent implements Agent {
         List<ToolDefinition> toolDefinitions = buildToolDefinitions();
         List<String> executedTools = new ArrayList<>();
         Map<String, Object> metadataCollector = new HashMap<>();
+        List<Map<String, Object>> executionSteps = new ArrayList<>();
+        long agentStartTime = System.currentTimeMillis();
+        UUID convId = context != null ? context.conversationId() : null;
 
-        for (int turn = 0; turn < MAX_AGENT_TURNS; turn++) {
+        for (int turn = 1; turn <= MAX_AGENT_TURNS; turn++) {
+            long turnStartTime = System.currentTimeMillis();
+            if (activityPublisher != null && convId != null) {
+                activityPublisher.publishTurnStart(convId, "VisionAgent", turn, MAX_AGENT_TURNS, messages.size(), toolDefinitions.size());
+            }
+
             LlmToolCallResponse llmResponse = llmClient.chatWithTools(messages, toolDefinitions);
 
             if (llmResponse == null) {
                 return AgentResponse.fallback("I encountered an issue analyzing your visual request. Please try again.");
             }
 
+            long turnDuration = System.currentTimeMillis() - turnStartTime;
+            if (activityPublisher != null && convId != null) {
+                List<String> proposedTools = llmResponse.hasToolCalls()
+                        ? llmResponse.toolCalls().stream().map(LlmToolCall::name).toList()
+                        : List.of();
+                activityPublisher.publishTurnEnd(convId, "VisionAgent", turn, MAX_AGENT_TURNS, turnDuration, proposedTools);
+            }
+
             if (!llmResponse.hasToolCalls()) {
+                long synthStart = System.currentTimeMillis();
+                if (activityPublisher != null && convId != null) {
+                    activityPublisher.publishSynthesisStart(convId, "VisionAgent");
+                }
                 String responseText = llmResponse.textResponse();
+
+                List<com.luna.aggarly.aiagent.engine.model.LumenResponseBlock> backendBlocks = new ArrayList<>(
+                        LumenResponseFormatter.extractBlocksFromMetadata(metadataCollector)
+                );
+
+                if (!executionSteps.isEmpty()) {
+                    Map<String, Object> planData = new LinkedHashMap<>();
+                    planData.put("title", "Visual Search & Inspection Plan");
+                    planData.put("totalSteps", executionSteps.size());
+                    planData.put("totalDurationMs", System.currentTimeMillis() - agentStartTime);
+                    planData.put("steps", executionSteps);
+                    backendBlocks.add(0, com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.executionPlan(planData));
+                    metadataCollector.put("executionPlan", executionSteps);
+                }
+
                 String formattedJson = LumenResponseFormatter.formatResponse(
                         responseText,
-                        LumenResponseFormatter.extractBlocksFromMetadata(metadataCollector)
+                        backendBlocks
                 );
                 String metadataJson = null;
                 if (!metadataCollector.isEmpty()) {
@@ -167,6 +216,13 @@ public class VisionAgent implements Agent {
                         metadataJson = objectMapper.writeValueAsString(metadataCollector);
                     } catch (Exception ignored) {}
                 }
+
+                if (activityPublisher != null && convId != null) {
+                    long synthDuration = System.currentTimeMillis() - synthStart;
+                    activityPublisher.publishSynthesisEnd(convId, "VisionAgent", synthDuration, "Generated visual search analysis & recommendations");
+                    activityPublisher.publishCompleted(convId, "VisionAgent", System.currentTimeMillis() - agentStartTime, executedTools.size(), turn);
+                }
+
                 return AgentResponse.builder()
                         .text(formattedJson)
                         .toolCalls(List.copyOf(executedTools))
@@ -183,11 +239,33 @@ public class VisionAgent implements Agent {
                     continue;
                 }
 
+                if (activityPublisher != null && convId != null) {
+                    activityPublisher.publishToolStart(convId, "VisionAgent", toolName, toolCall.arguments(), turn);
+                }
+                long toolStart = System.currentTimeMillis();
+
                 try {
-                    Object typedParams = objectMapper.convertValue(toolCall.arguments(), tool.parameterType());
+                    Object rawArgs = toolCall.arguments();
+                    if (expressionEngine != null && rawArgs != null) {
+                        com.luna.aggarly.scheduler.workflow.ExecutionContext exprCtx =
+                                com.luna.aggarly.scheduler.workflow.ExecutionContext.forTask(
+                                        user != null ? user.getUserId() : null,
+                                        null,
+                                        null,
+                                        "UTC"
+                                );
+                        if (convId != null) {
+                            exprCtx.variables().put("conversationId", convId.toString());
+                        }
+                        rawArgs = expressionEngine.resolve(rawArgs, exprCtx);
+                    }
+                    Object typedParams = objectMapper.convertValue(rawArgs, tool.parameterType());
                     Set<ConstraintViolation<Object>> violations = validator.validate(typedParams);
                     if (!violations.isEmpty()) {
                         messages.add(ChatMessage.toolResponse(toolName, "{\"error\": \"Validation failed: " + violations.iterator().next().getMessage() + "\"}"));
+                        if (activityPublisher != null && convId != null) {
+                            activityPublisher.publishToolEnd(convId, "VisionAgent", toolName, System.currentTimeMillis() - toolStart, toolCall.arguments(), "Validation failed", false, turn);
+                        }
                         continue;
                     }
 
@@ -195,6 +273,21 @@ public class VisionAgent implements Agent {
                     Tool<Object, Object> executableTool = (Tool<Object, Object>) tool;
                     ToolResult<Object> result = executableTool.execute(typedParams, user);
                     executedTools.add(toolName);
+
+                    long duration = System.currentTimeMillis() - toolStart;
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "VisionAgent", toolName, duration, toolCall.arguments(), result != null ? result.getData() : null, result != null && result.isSuccess(), turn);
+                    }
+
+                    Map<String, Object> step = new LinkedHashMap<>();
+                    step.put("stepNumber", executionSteps.size() + 1);
+                    step.put("agentName", "VisionAgent");
+                    step.put("toolName", toolName);
+                    step.put("status", result != null && result.isSuccess() ? "COMPLETED" : "FAILED");
+                    step.put("durationMs", duration);
+                    step.put("input", toolCall.arguments());
+                    step.put("summary", result != null && result.isSuccess() ? "Executed " + toolName + " successfully" : "Execution failed");
+                    executionSteps.add(step);
 
                     if (result != null && result.isSuccess() && result.getData() != null) {
                         metadataCollector.put(toolName, result.getData());
@@ -205,6 +298,10 @@ public class VisionAgent implements Agent {
                     messages.add(ChatMessage.toolResponse(toolName, serializedResult));
                 } catch (Exception ex) {
                     log.error("Tool '{}' execution failed", toolName, ex);
+                    long duration = System.currentTimeMillis() - toolStart;
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "VisionAgent", toolName, duration, toolCall.arguments(), ex.getMessage(), false, turn);
+                    }
                     messages.add(ChatMessage.toolResponse(toolName, "{\"error\": \"" + ex.getMessage() + "\"}"));
                 }
             }

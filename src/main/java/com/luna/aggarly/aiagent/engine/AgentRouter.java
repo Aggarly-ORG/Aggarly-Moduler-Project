@@ -16,6 +16,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AgentRouter {
 
+
     private final List<Agent> agents;
     private final PlanningEngine planningEngine;
 

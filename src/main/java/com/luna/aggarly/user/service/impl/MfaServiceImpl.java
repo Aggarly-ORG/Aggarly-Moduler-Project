@@ -35,30 +35,34 @@ public class MfaServiceImpl implements MfaService {
                 token(token).expiresIn(Duration.ofMinutes(5).toSeconds()).build();
     }
     public Mfa get(String token) {
-
-        return (Mfa)
-                redisTemplate.opsForValue()
-                        .get("mfa:" + token);
+        Object obj = redisTemplate.opsForValue().get("mfa:" + token);
+        if (obj instanceof Mfa mfa) {
+            return mfa;
+        }
+        return null;
     }
-    public void delete(String token) {
 
+    public void delete(String token) {
         redisTemplate.delete("mfa:" + token);
     }
-    public String CreateMfa(UUID userId,String secret){
+
+    public String CreateMfa(UUID userId, String secret) {
         String token = UUID.randomUUID().toString();
 
         MfaConfirmation challenge =
-                new MfaConfirmation(userId,secret, Instant.now());
+                new MfaConfirmation(userId, secret, Instant.now());
 
         redisTemplate.opsForValue()
                 .set("mfa:" + token, challenge, EXPIRATION);
 
         return token;
     }
-    public MfaConfirmation getMfaConfirm(String token) {
 
-        return (MfaConfirmation)
-                redisTemplate.opsForValue()
-                        .get("mfa:" + token);
+    public MfaConfirmation getMfaConfirm(String token) {
+        Object obj = redisTemplate.opsForValue().get("mfa:" + token);
+        if (obj instanceof MfaConfirmation mfaConfirm) {
+            return mfaConfirm;
+        }
+        return null;
     }
 }

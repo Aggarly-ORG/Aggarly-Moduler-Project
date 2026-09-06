@@ -16,6 +16,14 @@ import java.util.*;
 @Service
 public class JsonSchemaService {
 
+    /**
+     * Generated schemas are deterministic per root type; results are cached because
+     * every tool exposes its parameter/response schema repeatedly during agent loops.
+     * Callers receive defensive copies and must not rely on identity.
+     */
+    private final java.util.concurrent.ConcurrentHashMap<Class<?>, JsonNode> schemaCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     private final ObjectMapper objectMapper;
 
     public JsonSchemaService() {
@@ -33,18 +41,25 @@ public class JsonSchemaService {
             return objectMapper.createObjectNode().put("type", "null");
         }
 
-        SchemaContext context = new SchemaContext();
-        JsonNode root = generateType(rootType, context);
+        JsonNode cached = schemaCache.get(rootType);
+        if (cached == null) {
+            SchemaContext context = new SchemaContext();
+            JsonNode root = generateType(rootType, context);
 
-        if (root instanceof ObjectNode rootObject) {
-            rootObject.put("$schema", "https://json-schema.org/draft/2020-12/schema");
+            if (root instanceof ObjectNode rootObject) {
+                rootObject.put("$schema", "https://json-schema.org/draft/2020-12/schema");
 
-            if (!context.definitions.isEmpty()) {
-                rootObject.set("$defs", context.definitions);
+                if (!context.definitions.isEmpty()) {
+                    rootObject.set("$defs", context.definitions);
+                }
+            }
+            cached = root;
+            JsonNode existing = schemaCache.putIfAbsent(rootType, cached);
+            if (existing != null) {
+                cached = existing;
             }
         }
-
-        return root;
+        return cached.deepCopy();
     }
 
     // ========================================================================

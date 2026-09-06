@@ -4,16 +4,37 @@ public final class VisionPromptTemplates {
 
     private VisionPromptTemplates() {}
 
-    public static final String PROMPT_VERSION = "2.1.0";
+    public static final String PROMPT_VERSION = "2.3.0";
+
+    public static final String DOMAIN_VALIDATION_PROMPT = """
+            You are a strict domain gatekeeper and visual describer for a luxury vacation rental and real estate platform.
+            Analyze this uploaded image and determine if it represents a valid real estate / property scene (e.g. bedroom, living room, bathroom, kitchen, dining, balcony, terrace, patio, swimming pool, building exterior, architectural facade, or natural landscape view).
+
+            Return a strict JSON object:
+            {
+              "isPropertyDomain": true,
+              "category": "REAL_ESTATE|FOOTWEAR|APPAREL|VEHICLE|ANIMAL|FOOD|ELECTRONICS|DOCUMENT|MEME|OTHER_OBJECT",
+              "detectedSubject": "cliffside balcony terrace with turquoise loungers overlooking sea view",
+              "sceneDescription": "A luxury whitewashed stone balcony terrace with turquoise wicker lounge chairs overlooking a panoramic sunset ocean view in Santorini.",
+              "confidence": 0.99,
+              "rejectionReason": null
+            }
+
+            STRICT DOMAIN RULES:
+            1. If the photo displays shoes, sneakers, clothing, fashion accessories, animals, pets, cars, motorcycles, food plates, close-up selfies, screenshots, or random standalone consumer products, set 'isPropertyDomain' to FALSE and specify the detected category.
+            2. If the photo displays an actual room, interior, balcony, pool, villa, building exterior, garden, or scenic view, set 'isPropertyDomain' to TRUE and write a vivid 1-sentence 'sceneDescription'.
+            3. Respond with valid JSON ONLY.
+            """;
 
     public static final String SCENE_AND_CAPTION_PROMPT = """
             You are an expert architectural and rental property visual classifier with OCR text extraction capabilities.
             Analyze this photo and return a strict JSON object with these exact keys:
 
             {
-              "sceneType": "BALCONY|VIEW|LIVING_ROOM|BEDROOM|BATHROOM|KITCHEN|DINING|POOL|EXTERIOR|WORKSPACE|OTHER",
+              "sceneType": "BALCONY|VIEW|LIVING_ROOM|BEDROOM|BATHROOM|KITCHEN|DINING|POOL|EXTERIOR|WORKSPACE|NON_PROPERTY|OTHER",
               "sceneConfidence": 0.98,
               "isIndoor": false,
+              "isPropertyDomain": true,
               "viewType": "SEA_VIEW|CITY_SKYLINE|MOUNTAIN|GARDEN|POOL_VIEW|STREET|COURTYARD|NONE",
               "aiCaption": "A detailed 1-2 sentence description of the scene, furniture, materials, and visible outdoor views.",
               "altText": "A concise 5-10 word accessibility description.",
@@ -30,7 +51,8 @@ public final class VisionPromptTemplates {
             4. LIVING_ROOM: Enclosed indoor living room or indoor lounge with indoor sofas.
             5. isIndoor: MUST be false for balconies, terraces, patios, pools, and outdoor views.
             6. viewType: Set to SEA_VIEW if the ocean, sea, coast, or water horizon is visible.
-            7. OCR TEXT EXTRACTION: Carefully read the image and transcribe ANY legible text visible anywhere in the photo (e.g. wall quotes, framed paintings with writing, WiFi signs, book titles, coffee table magazines, appliance logos, street signs, building names). If readable text exists, output the exact words in 'ocrText'. If no text is visible, set 'ocrText' to null.
+            7. NON_PROPERTY / OUT-OF-DOMAIN: If the photo depicts shoes, sneakers, clothing, fashion products, vehicles, animals, memes, food, or screenshots rather than an actual property/architectural space, set 'sceneType' to 'NON_PROPERTY', 'isPropertyDomain' to false, 'moderationStatus' to 'REJECTED', and state the reason in 'moderationReason'.
+            8. OCR TEXT EXTRACTION: Carefully read the image and transcribe ANY legible text visible anywhere in the photo (e.g. wall quotes, framed paintings with writing, WiFi signs, book titles, coffee table magazines, appliance logos, street signs, building names). If readable text exists, output the exact words in 'ocrText'. If no text is visible, set 'ocrText' to null.
 
             Respond with valid JSON ONLY. No markdown wrapper, no conversational text.
             """;

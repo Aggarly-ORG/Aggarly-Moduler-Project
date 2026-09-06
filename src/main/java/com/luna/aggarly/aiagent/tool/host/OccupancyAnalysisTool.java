@@ -11,7 +11,11 @@ import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
-public class OccupancyAnalysisTool implements Tool<UUID, Map<String, Object>> {
+public class OccupancyAnalysisTool implements Tool<OccupancyAnalysisTool.Params, Map<String, Object>> {
+
+    public record Params(
+            UUID propertyId
+    ) {}
 
     @Override
     public String name() {
@@ -24,8 +28,8 @@ public class OccupancyAnalysisTool implements Tool<UUID, Map<String, Object>> {
     }
 
     @Override
-    public Class<UUID> parameterType() {
-        return UUID.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -34,7 +38,7 @@ public class OccupancyAnalysisTool implements Tool<UUID, Map<String, Object>> {
     }
 
     @Override
-    public ToolResult<Map<String, Object>> execute(UUID propertyId, UserPrincipal user) {
+    public ToolResult<Map<String, Object>> execute(Params params, UserPrincipal user) {
         return ToolResult.ok(Map.of(
                 "occupancyRatePercentage", 82.5,
                 "totalBookingsCount", 24,

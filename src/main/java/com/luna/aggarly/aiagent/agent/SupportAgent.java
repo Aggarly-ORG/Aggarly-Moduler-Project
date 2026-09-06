@@ -13,17 +13,15 @@ import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
+@Slf4j
 @Component
 public class SupportAgent implements Agent {
 
-    private static final Logger log = LoggerFactory.getLogger(SupportAgent.class);
     private static final int MAX_AGENT_TURNS = 5;
 
     private static final String SUPPORT_AGENT_SYSTEM_PROMPT = """
@@ -375,6 +373,17 @@ public class SupportAgent implements Agent {
            - Purpose: Login and OAuth2 callback authentication.
 
         ================================================================
+        RUNTIME EXPRESSION INJECTION & DYNAMIC FUNCTIONS
+        ================================================================
+        When invoking tools, you have access to Aggarly's Runtime Expression Engine.
+        All tool arguments are dynamically pre-evaluated through the expression engine before execution!
+        You can use:
+        - Root Object & Context: {{obj.<field>}}, {{user.id}}, {{current_conversation()}}, {{origin_channel()}}
+        - Date Functions: {{today()}}, {{now()}}, {{date_add(today(), 3, 'DAYS')}}, {{date_sub(today(), 1, 'MONTHS')}}, {{format_date(today(), 'yyyy-MM-dd')}}
+        - Entity Lookups: {{property('<id>').title}}, {{booking('<id>').status}}, {{user('<id>').email}}
+        - String & Math Utilities: {{upper(str)}}, {{format_currency(amount, 'USD')}}, {{join(list, ', ')}}, {{first(list)}}, {{coalesce(a, b)}}, {{ternary(cond, trueVal, falseVal)}}
+
+        ================================================================
         FAILURE HANDLING
         ================================================================
 
@@ -388,6 +397,8 @@ public class SupportAgent implements Agent {
     private final LlmClient llmClient;
     private final ObjectMapper objectMapper;
     private final Validator validator;
+    private final com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher activityPublisher;
+    private final com.luna.aggarly.common.expression.ExpressionEngine expressionEngine;
 
     private final Map<String, Tool<?, ?>> toolRegistry = new HashMap<>();
 
@@ -403,7 +414,9 @@ public class SupportAgent implements Agent {
             "messaging.translate",
             "messaging.grammar",
             "messaging.summary",
-            "messaging.generateReply"
+            "messaging.generateReply",
+            "messaging.readConversation",
+            "messaging.sendToHost"
     );
 
     @Autowired
@@ -411,16 +424,23 @@ public class SupportAgent implements Agent {
             LlmClient llmClient,
             ObjectMapper objectMapper,
             Validator validator,
-            List<Tool<?, ?>> tools
+            @Autowired(required = false) com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher activityPublisher,
+            @Autowired(required = false) com.luna.aggarly.common.expression.ExpressionEngine expressionEngine,
+            @Qualifier("toolRegistry") Map<String, Tool<?, ?>> sharedToolRegistry
     ) {
         this.llmClient = llmClient;
         this.objectMapper = objectMapper;
         this.validator = validator;
+        this.activityPublisher = activityPublisher;
+        this.expressionEngine = expressionEngine;
 
-        if (tools != null) {
-            for (Tool<?, ?> tool : tools) {
-                if (SUPPORTED_TOOLS.contains(tool.name())) {
-                    toolRegistry.put(tool.name(), tool);
+        if (sharedToolRegistry != null) {
+            for (String toolName : SUPPORTED_TOOLS) {
+                Tool<?, ?> tool = sharedToolRegistry.get(toolName);
+                if (tool != null) {
+                    toolRegistry.put(toolName, tool);
+                } else {
+                    log.warn("SupportAgent: declared tool '{}' has no registered implementation", toolName);
                 }
             }
         }
@@ -462,9 +482,16 @@ public class SupportAgent implements Agent {
         List<ChatMessage> messages = buildConversation(intent, context);
         List<String> executedTools = new ArrayList<>();
         Map<String, Object> metadataCollector = new HashMap<>();
+        List<Map<String, Object>> executionSteps = new ArrayList<>();
+        long agentStartTime = System.currentTimeMillis();
+        UUID convId = context != null ? context.conversationId() : null;
 
         for (int turn = 1; turn <= MAX_AGENT_TURNS; turn++) {
             log.debug("SupportAgent turn {}/{}", turn, MAX_AGENT_TURNS);
+            long turnStartTime = System.currentTimeMillis();
+            if (activityPublisher != null && convId != null) {
+                activityPublisher.publishTurnStart(convId, "SupportAgent", turn, MAX_AGENT_TURNS, messages.size(), toolDefinitions.size());
+            }
 
             LlmToolCallResponse llmResponse;
             try {
@@ -474,12 +501,39 @@ public class SupportAgent implements Agent {
                 return failureResponse("I'm having trouble processing your request right now. Please try again in a moment.", executedTools);
             }
 
+            long turnDuration = System.currentTimeMillis() - turnStartTime;
+            if (activityPublisher != null && convId != null) {
+                List<String> proposedTools = llmResponse.hasToolCalls()
+                        ? llmResponse.toolCalls().stream().map(LlmToolCall::name).toList()
+                        : List.of();
+                activityPublisher.publishTurnEnd(convId, "SupportAgent", turn, MAX_AGENT_TURNS, turnDuration, proposedTools);
+            }
+
             if (!llmResponse.hasToolCalls()) {
+                long synthStart = System.currentTimeMillis();
+                if (activityPublisher != null && convId != null) {
+                    activityPublisher.publishSynthesisStart(convId, "SupportAgent");
+                }
                 String text = llmResponse.textResponse();
                 if (text == null || text.isBlank()) {
                     log.warn("SupportAgent: empty response on turn {}", turn);
                     return failureResponse("I wasn't able to generate a response. Please rephrase your question.", executedTools);
                 }
+
+                List<com.luna.aggarly.aiagent.engine.model.LumenResponseBlock> backendBlocks = new ArrayList<>(
+                        com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.extractBlocksFromMetadata(metadataCollector)
+                );
+
+                if (!executionSteps.isEmpty()) {
+                    Map<String, Object> planData = new LinkedHashMap<>();
+                    planData.put("title", "Support & Resolution Plan");
+                    planData.put("totalSteps", executionSteps.size());
+                    planData.put("totalDurationMs", System.currentTimeMillis() - agentStartTime);
+                    planData.put("steps", executionSteps);
+                    backendBlocks.add(0, com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.executionPlan(planData));
+                    metadataCollector.put("executionPlan", executionSteps);
+                }
+
                 String metadataJson = null;
                 if (!metadataCollector.isEmpty()) {
                     try {
@@ -490,8 +544,15 @@ public class SupportAgent implements Agent {
                 }
                 String formattedJson = com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.formatResponse(
                         text,
-                        com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.extractBlocksFromMetadata(metadataCollector)
+                        backendBlocks
                 );
+
+                if (activityPublisher != null && convId != null) {
+                    long synthDuration = System.currentTimeMillis() - synthStart;
+                    activityPublisher.publishSynthesisEnd(convId, "SupportAgent", synthDuration, "Generated customer support guidance and resolution");
+                    activityPublisher.publishCompleted(convId, "SupportAgent", System.currentTimeMillis() - agentStartTime, executedTools.size(), turn);
+                }
+
                 return AgentResponse.builder()
                         .text(formattedJson)
                         .toolCalls(List.copyOf(executedTools))
@@ -511,20 +572,45 @@ public class SupportAgent implements Agent {
                     continue;
                 }
 
+                if (activityPublisher != null && convId != null) {
+                    activityPublisher.publishToolStart(convId, "SupportAgent", toolName, toolCall.arguments(), turn);
+                }
+                long toolStart = System.currentTimeMillis();
+
                 if (tool.requiresAuthentication() && user == null) {
                     log.warn("SupportAgent: unauthenticated access attempted on tool '{}'", toolName);
                     messages.add(ChatMessage.toolResponse(toolName, buildErrorJson("AUTHENTICATION_REQUIRED",
                             "You must be signed in to access this support feature.")));
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "SupportAgent", toolName, System.currentTimeMillis() - toolStart, toolCall.arguments(), "Authentication required", false, turn);
+                    }
                     continue;
                 }
 
                 Object typedParameters;
                 try {
-                    typedParameters = objectMapper.convertValue(toolCall.arguments(), tool.parameterType());
+                    Object rawArgs = toolCall.arguments();
+                    if (expressionEngine != null && rawArgs != null) {
+                        com.luna.aggarly.scheduler.workflow.ExecutionContext exprCtx =
+                                com.luna.aggarly.scheduler.workflow.ExecutionContext.forTask(
+                                        user != null ? user.getUserId() : null,
+                                        null,
+                                        null,
+                                        "UTC"
+                                );
+                        if (convId != null) {
+                            exprCtx.variables().put("conversationId", convId.toString());
+                        }
+                        rawArgs = expressionEngine.resolve(rawArgs, exprCtx);
+                    }
+                    typedParameters = objectMapper.convertValue(rawArgs, tool.parameterType());
                 } catch (IllegalArgumentException ex) {
                     log.warn("SupportAgent: malformed arguments for tool '{}': {}", toolName, ex.getMessage());
                     messages.add(ChatMessage.toolResponse(toolName, buildErrorJson("INVALID_ARGUMENTS",
                             "The arguments provided for '" + toolName + "' could not be parsed.")));
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "SupportAgent", toolName, System.currentTimeMillis() - toolStart, toolCall.arguments(), "Invalid arguments", false, turn);
+                    }
                     continue;
                 }
 
@@ -537,6 +623,9 @@ public class SupportAgent implements Agent {
                             .orElse("Invalid arguments.");
                     log.warn("SupportAgent: validation failed for '{}': {}", toolName, detail);
                     messages.add(ChatMessage.toolResponse(toolName, buildErrorJson("VALIDATION_FAILED", detail)));
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "SupportAgent", toolName, System.currentTimeMillis() - toolStart, toolCall.arguments(), detail, false, turn);
+                    }
                     continue;
                 }
 
@@ -549,6 +638,20 @@ public class SupportAgent implements Agent {
                     ToolResult<Object> result = executableTool.execute(typedParameters, user);
 
                     executedTools.add(toolName);
+                    long duration = System.currentTimeMillis() - toolStart;
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "SupportAgent", toolName, duration, toolCall.arguments(), result.getData(), result.isSuccess(), turn);
+                    }
+
+                    Map<String, Object> step = new LinkedHashMap<>();
+                    step.put("stepNumber", executionSteps.size() + 1);
+                    step.put("agentName", "SupportAgent");
+                    step.put("toolName", toolName);
+                    step.put("status", result.isSuccess() ? "COMPLETED" : "FAILED");
+                    step.put("durationMs", duration);
+                    step.put("input", toolCall.arguments());
+                    step.put("summary", result.isSuccess() ? "Executed " + toolName + " successfully" : "Execution failed");
+                    executionSteps.add(step);
 
                     if (result.isSuccess() && result.getData() != null) {
                         if (toolName.equals("support.faq") || toolName.equals("support.verificationHelp")) {
@@ -565,6 +668,10 @@ public class SupportAgent implements Agent {
 
                 } catch (Exception ex) {
                     log.error("SupportAgent: tool '{}' threw an exception on turn {}", toolName, turn, ex);
+                    long duration = System.currentTimeMillis() - toolStart;
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "SupportAgent", toolName, duration, toolCall.arguments(), ex.getMessage(), false, turn);
+                    }
                     messages.add(ChatMessage.toolResponse(toolName, buildErrorJson("TOOL_EXECUTION_FAILED",
                             "I was unable to retrieve the requested information. Please try again.")));
                 }

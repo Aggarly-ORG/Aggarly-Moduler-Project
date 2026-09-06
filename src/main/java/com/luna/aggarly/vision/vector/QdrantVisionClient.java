@@ -476,42 +476,36 @@ public class QdrantVisionClient {
         Filter.Builder filterBuilder =
                 Filter.newBuilder();
 
-        for (QdrantCondition condition :
-                filter.must()) {
-
-            if (condition.value() instanceof String stringValue) {
-
-                filterBuilder.addMust(
-                        Condition.newBuilder()
-                                .setField(
-                                        FieldCondition.newBuilder()
-                                                .setKey(condition.key())
-                                                .setMatch(
-                                                        Match.newBuilder()
-                                                                .setKeyword(stringValue)
-                                                                .build()
-                                                )
-                                                .build()
-                                )
+        for (QdrantCondition condition : filter.must()) {
+            String op = condition.operator() != null ? condition.operator() : "EQUALS";
+            if ("RANGE_LTE".equals(op) && condition.value() instanceof Number num) {
+                filterBuilder.addMust(Condition.newBuilder().setField(
+                        FieldCondition.newBuilder()
+                                .setKey(condition.key())
+                                .setRange(io.qdrant.client.grpc.Common.Range.newBuilder().setLte(num.doubleValue()).build())
                                 .build()
-                );
-
+                ).build());
+            } else if ("RANGE_GTE".equals(op) && condition.value() instanceof Number num) {
+                filterBuilder.addMust(Condition.newBuilder().setField(
+                        FieldCondition.newBuilder()
+                                .setKey(condition.key())
+                                .setRange(io.qdrant.client.grpc.Common.Range.newBuilder().setGte(num.doubleValue()).build())
+                                .build()
+                ).build());
+            } else if (condition.value() instanceof String stringValue) {
+                filterBuilder.addMust(Condition.newBuilder().setField(
+                        FieldCondition.newBuilder()
+                                .setKey(condition.key())
+                                .setMatch(Match.newBuilder().setKeyword(stringValue).build())
+                                .build()
+                ).build());
             } else if (condition.value() instanceof Boolean booleanValue) {
-
-                filterBuilder.addMust(
-                        Condition.newBuilder()
-                                .setField(
-                                        FieldCondition.newBuilder()
-                                                .setKey(condition.key())
-                                                .setMatch(
-                                                        Match.newBuilder()
-                                                                .setBoolean(booleanValue)
-                                                                .build()
-                                                )
-                                                .build()
-                                )
+                filterBuilder.addMust(Condition.newBuilder().setField(
+                        FieldCondition.newBuilder()
+                                .setKey(condition.key())
+                                .setMatch(Match.newBuilder().setBoolean(booleanValue).build())
                                 .build()
-                );
+                ).build());
             }
         }
 
@@ -656,11 +650,7 @@ public class QdrantVisionClient {
             Map<String, Object> payload,
             QdrantFilter filter
     ) {
-
-        if (filter == null
-                || filter.must() == null
-                || filter.must().isEmpty()) {
-
+        if (filter == null || filter.must() == null || filter.must().isEmpty()) {
             return true;
         }
 
@@ -668,19 +658,42 @@ public class QdrantVisionClient {
             return false;
         }
 
-        for (QdrantCondition condition :
-                filter.must()) {
+        for (QdrantCondition condition : filter.must()) {
+            Object actual = payload.get(condition.key());
+            Object expected = condition.value();
 
-            Object actual =
-                    payload.get(condition.key());
-
-            Object expected =
-                    condition.value();
-
-            if (actual == null
-                    || !actual.equals(expected)) {
-
+            if (actual == null) {
                 return false;
+            }
+
+            String op = condition.operator() != null ? condition.operator() : "EQUALS";
+            switch (op) {
+                case "RANGE_LTE" -> {
+                    if (actual instanceof Number actualNum && expected instanceof Number expectedNum) {
+                        if (actualNum.doubleValue() > expectedNum.doubleValue()) return false;
+                    } else {
+                        return false;
+                    }
+                }
+                case "RANGE_GTE" -> {
+                    if (actual instanceof Number actualNum && expected instanceof Number expectedNum) {
+                        if (actualNum.doubleValue() < expectedNum.doubleValue()) return false;
+                    } else {
+                        return false;
+                    }
+                }
+                case "IN" -> {
+                    if (actual instanceof List<?> list) {
+                        if (!list.contains(expected)) return false;
+                    } else if (!actual.toString().equalsIgnoreCase(expected.toString())) {
+                        return false;
+                    }
+                }
+                default -> {
+                    if (!actual.toString().equalsIgnoreCase(expected.toString())) {
+                        return false;
+                    }
+                }
             }
         }
 

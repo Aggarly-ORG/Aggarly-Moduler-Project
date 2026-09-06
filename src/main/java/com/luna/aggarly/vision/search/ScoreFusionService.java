@@ -65,9 +65,20 @@ public class ScoreFusionService {
         List<FusedImageCandidate> fused = new ArrayList<>();
 
         for (ImageScoreAccumulator acc : imageMap.values()) {
-            float baseScore = totalWeight > 0
-                    ? ((wImg * acc.imageScore) + (wCap * acc.captionScore)) / totalWeight
-                    : Math.max(acc.imageScore, acc.captionScore);
+            float baseScore;
+            if (mode == SearchMode.TEXT_ONLY) {
+                baseScore = acc.captionScore > 0 ? acc.captionScore : acc.imageScore;
+            } else if (mode == SearchMode.IMAGE_ONLY) {
+                if (acc.imageScore > 0 && acc.captionScore > 0) {
+                    baseScore = totalWeight > 0 ? ((wImg * acc.imageScore) + (wCap * acc.captionScore)) / totalWeight : acc.imageScore;
+                } else {
+                    baseScore = acc.imageScore > 0 ? acc.imageScore : acc.captionScore;
+                }
+            } else {
+                baseScore = totalWeight > 0
+                        ? ((wImg * acc.imageScore) + (wCap * acc.captionScore)) / totalWeight
+                        : Math.max(acc.imageScore, acc.captionScore);
+            }
 
             String sceneType = acc.payload != null && acc.payload.containsKey("sceneType") ? acc.payload.get("sceneType").toString() : "BEDROOM";
             String qualityGrade = acc.payload != null && acc.payload.containsKey("qualityGrade") ? acc.payload.get("qualityGrade").toString() : "ACCEPTABLE";
@@ -81,7 +92,8 @@ public class ScoreFusionService {
                 default -> 0.0f;
             };
 
-            float fusedScore = Math.min(1.0f, baseScore + qualityBonus);
+            // Only apply quality bonus if base score is strictly non-zero
+            float fusedScore = (baseScore > 0.01f) ? Math.min(1.0f, baseScore + qualityBonus) : 0.0f;
 
             fused.add(new FusedImageCandidate(
                     acc.propertyId,

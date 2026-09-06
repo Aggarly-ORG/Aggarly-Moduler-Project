@@ -8,7 +8,12 @@ import org.springframework.stereotype.Component;
 
 @Component
 @RequiredArgsConstructor
-public class FaqTool implements Tool<String, String> {
+public class FaqTool implements Tool<FaqTool.Params, String> {
+
+    public record Params(
+            String query,
+            String category
+    ) {}
 
     @Override
     public String name() {
@@ -21,8 +26,8 @@ public class FaqTool implements Tool<String, String> {
     }
 
     @Override
-    public Class<String> parameterType() {
-        return String.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -31,7 +36,7 @@ public class FaqTool implements Tool<String, String> {
     }
 
     @Override
-    public ToolResult<String> execute(String query, UserPrincipal user) {
+    public ToolResult<String> execute(Params params, UserPrincipal user) {
         return ToolResult.ok("Aggarly FAQ Answer: Check-in instructions are sent automatically 24 hours prior to check-in. Payment is secured via Stripe.");
     }
 }

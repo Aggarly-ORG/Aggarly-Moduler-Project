@@ -9,22 +9,21 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-base: #0a0d14;
-      --bg-surface: #111726;
-      --bg-card: #161e31;
-      --bg-hover: #1c263d;
-      --border-subtle: #24304c;
+      --bg-base: #090d16;
+      --bg-surface: #101726;
+      --bg-card: #151f33;
+      --bg-hover: #1c2a45;
+      --border-subtle: #223252;
       --border-focus: #3b82f6;
       --text-main: #f1f5f9;
       --text-muted: #94a3b8;
       --text-dim: #64748b;
       --primary: #3b82f6;
-      --primary-gradient: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-      --accent-coral: #f97316;
+      --primary-gradient: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
       --accent-emerald: #10b981;
       --accent-amber: #f59e0b;
-      --accent-rose: #f43f5e;
-      --accent-purple: #8b5cf6;
+      --accent-coral: #f97316;
+      --accent-purple: #a855f7;
       --shadow-lg: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
       --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
       --font-mono: 'JetBrains Mono', monospace;
@@ -40,7 +39,6 @@
       min-height: 100vh;
     }
 
-    /* App Header */
     header {
       background: var(--bg-surface);
       border-bottom: 1px solid var(--border-subtle);
@@ -59,8 +57,8 @@
       gap: 12px;
     }
     .brand-logo {
-      width: 38px;
-      height: 38px;
+      width: 40px;
+      height: 40px;
       background: var(--primary-gradient);
       border-radius: 10px;
       display: flex;
@@ -86,8 +84,8 @@
     .system-status {
       display: flex;
       align-items: center;
-      gap: 14px;
-      font-size: 0.85rem;
+      gap: 12px;
+      flex-wrap: wrap;
     }
     .status-badge {
       display: flex;
@@ -123,14 +121,12 @@
       box-shadow: 0 0 8px var(--accent-amber);
     }
 
-    /* Main Container */
     .container {
       max-width: 1440px;
       margin: 0 auto;
       padding: 2rem;
     }
 
-    /* Tab Navigation */
     .nav-tabs {
       display: flex;
       gap: 8px;
@@ -165,7 +161,6 @@
       border-bottom: 2px solid var(--primary);
     }
 
-    /* View Panels */
     .view-panel {
       display: none;
     }
@@ -178,7 +173,6 @@
       to { opacity: 1; transform: translateY(0); }
     }
 
-    /* Card Containers */
     .card {
       background: var(--bg-card);
       border: 1px solid var(--border-subtle);
@@ -201,7 +195,6 @@
       margin-bottom: 1.25rem;
     }
 
-    /* Form Controls */
     .form-group {
       margin-bottom: 1.25rem;
     }
@@ -233,7 +226,6 @@
       gap: 1rem;
     }
 
-    /* Buttons */
     .btn {
       display: inline-flex;
       align-items: center;
@@ -262,10 +254,9 @@
       color: var(--text-main);
     }
     .btn-secondary:hover {
-      background: #24304c;
+      background: #223252;
     }
 
-    /* Chips */
     .chips-group {
       display: flex;
       flex-wrap: wrap;
@@ -287,15 +278,39 @@
       display: none;
     }
     .chip:has(input:checked) {
-      background: rgba(59, 130, 246, 0.15);
+      background: rgba(59, 130, 246, 0.2);
       border-color: var(--primary);
       color: #93c5fd;
+    }
+
+    /* File Upload Dropzone */
+    .dropzone {
+      border: 2px dashed var(--border-subtle);
+      border-radius: 12px;
+      padding: 1.5rem;
+      text-align: center;
+      background: rgba(16, 23, 38, 0.6);
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-bottom: 1rem;
+    }
+    .dropzone:hover, .dropzone.dragover {
+      border-color: var(--primary);
+      background: rgba(59, 130, 246, 0.05);
+    }
+    .dropzone-preview {
+      max-height: 180px;
+      max-width: 100%;
+      border-radius: 8px;
+      margin-top: 10px;
+      display: none;
+      object-fit: cover;
     }
 
     /* Results Grid */
     .results-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
       gap: 1.5rem;
       margin-top: 1.5rem;
     }
@@ -315,7 +330,7 @@
     .property-media {
       position: relative;
       width: 100%;
-      height: 200px;
+      height: 220px;
       background: #000;
     }
     .property-img {
@@ -327,24 +342,25 @@
       position: absolute;
       top: 10px;
       right: 10px;
-      background: rgba(16, 185, 129, 0.9);
+      background: rgba(16, 185, 129, 0.92);
       backdrop-filter: blur(4px);
       color: #fff;
-      font-size: 0.75rem;
-      font-weight: 700;
-      padding: 4px 8px;
+      font-size: 0.78rem;
+      font-weight: 800;
+      padding: 4px 10px;
       border-radius: 6px;
       font-family: var(--font-mono);
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
     }
     .scene-pill {
       position: absolute;
       bottom: 10px;
       left: 10px;
-      background: rgba(0, 0, 0, 0.75);
+      background: rgba(0, 0, 0, 0.8);
       backdrop-filter: blur(4px);
       color: #cbd5e1;
-      font-size: 0.7rem;
-      font-weight: 600;
+      font-size: 0.72rem;
+      font-weight: 700;
       padding: 3px 8px;
       border-radius: 4px;
       text-transform: uppercase;
@@ -357,31 +373,30 @@
       flex-grow: 1;
     }
     .prop-title {
-      font-size: 1rem;
+      font-size: 1.05rem;
       font-weight: 700;
       margin-bottom: 4px;
       color: var(--text-main);
     }
     .prop-location {
-      font-size: 0.8rem;
+      font-size: 0.85rem;
       color: var(--text-muted);
       margin-bottom: 8px;
     }
     .prop-price {
-      font-size: 1.1rem;
+      font-size: 1.15rem;
       font-weight: 800;
       color: #60a5fa;
       margin-bottom: 10px;
     }
     .prop-explanation {
       background: rgba(59, 130, 246, 0.08);
-      border-left: 2px solid var(--primary);
-      padding: 8px;
+      border-left: 3px solid var(--primary);
+      padding: 8px 12px;
       border-radius: 4px;
-      font-size: 0.8rem;
+      font-size: 0.82rem;
       color: #cbd5e1;
       margin-bottom: 10px;
-      font-style: italic;
     }
     .tag-container {
       display: flex;
@@ -391,27 +406,25 @@
     }
     .mini-tag {
       background: var(--bg-hover);
-      font-size: 0.7rem;
+      font-size: 0.72rem;
       color: var(--text-muted);
-      padding: 2px 6px;
+      padding: 3px 7px;
       border-radius: 4px;
     }
 
-    /* JSON display box */
     .json-box {
       background: #060910;
       border: 1px solid var(--border-subtle);
       border-radius: 8px;
       padding: 1rem;
       font-family: var(--font-mono);
-      font-size: 0.8rem;
+      font-size: 0.82rem;
       color: #93c5fd;
       max-height: 400px;
       overflow-y: auto;
       white-space: pre-wrap;
     }
 
-    /* Quality meter */
     .score-meter {
       height: 8px;
       background: var(--bg-surface);
@@ -426,7 +439,6 @@
       transition: width 0.5s ease;
     }
 
-    /* Responsive */
     @media (max-width: 900px) {
       .container { padding: 1rem; }
       header { padding: 1rem; flex-direction: column; gap: 12px; align-items: flex-start; }
@@ -441,18 +453,22 @@
       <div class="brand-logo">A</div>
       <div>
         <div class="brand-title">Aggarly Multimodal Vision Studio</div>
-        <div class="brand-subtitle">Visual Intelligence & Aesthetic Retrieval Engine</div>
+        <div class="brand-subtitle">Neural CLIP & LLM Filtered Search Engine</div>
       </div>
     </div>
 
     <div class="system-status">
+      <div id="clipStatusBadge" class="status-badge online">
+        <span id="clipDot" class="status-dot online"></span>
+        <span id="clipStatusText">OpenCLIP: Checking...</span>
+      </div>
       <div id="ollamaStatusBadge" class="status-badge offline">
         <span id="ollamaDot" class="status-dot offline"></span>
-        <span id="ollamaStatusText">Ollama: Checking...</span>
+        <span id="ollamaStatusText">Ollama VLM: Checking...</span>
       </div>
       <div class="status-badge online">
         <span class="status-dot online"></span>
-        <span>Qdrant Vectors (768d): Active</span>
+        <span>Qdrant (768d + Payloads): Active</span>
       </div>
     </div>
   </header>
@@ -462,55 +478,92 @@
 
     <!-- Tab Navigation -->
     <nav class="nav-tabs">
-      <button class="tab-btn active" onclick="switchTab('search-view')">🔎 Visual Search Studio</button>
-      <button class="tab-btn" onclick="switchTab('perception-view')">🔬 Perception & VLM Lab</button>
+      <button class="tab-btn active" onclick="switchTab('search-view')">🔎 Visual & Filtered Search</button>
+      <button class="tab-btn" onclick="switchTab('perception-view')">🔬 Image Perception & VLM Lab</button>
       <button class="tab-btn" onclick="switchTab('profile-view')">🏛️ Property Visual Profiles</button>
       <button class="tab-btn" onclick="switchTab('host-view')">📸 Host Photo Coverage Advisor</button>
-      <button class="tab-btn" onclick="switchTab('tasks-view')">⚡ Async Worker Queue & NDCG Benchmark</button>
+      <button class="tab-btn" onclick="switchTab('tasks-view')">⚡ Async Worker Queue & Benchmark</button>
     </nav>
 
-    <!-- 1. VISUAL SEARCH STUDIO -->
+    <!-- 1. VISUAL & FILTERED SEARCH STUDIO -->
     <section id="search-view" class="view-panel active">
       <div class="card">
-        <div class="card-title">✨ Hybrid Multi-Modal Visual Search</div>
-        <div class="card-desc">Execute multi-channel retrieval across Image Vectors (768d), AI Captions (768d), and Property Descriptions with hard business filtering.</div>
+        <div class="card-title">✨ Hybrid Multi-Modal & Filtered Visual Search</div>
+        <div class="card-desc">Execute multi-channel retrieval across OpenCLIP Image Vectors (512d), AI Captions (768d), and Property Descriptions with Qdrant In-Vector Pre-Filtering and PostgreSQL Hard Relational Constraints.</div>
 
         <div class="form-row">
           <div class="form-group" style="grid-column: span 2;">
             <label class="form-label">Search Mode</label>
             <select id="searchMode" class="form-select" onchange="toggleSearchInputs()">
-              <option value="TEXT">🔤 Natural Language Aesthetic Search (e.g. "modern beachfront villa with private infinity pool")</option>
-              <option value="IMAGE">🖼️ Visual Image Similarity Search (by reference photo key)</option>
-              <option value="MULTIMODAL">⚡ Multimodal Hybrid (Image + Text Modifiers)</option>
+              <option value="TEXT" selected>🔤 Natural Language Aesthetic Search (with LLM Intent Extraction)</option>
+              <option value="UPLOAD">🖼️ Real Photo File Upload Search (Drag & Drop or Select Image)</option>
+              <option value="MULTIMODAL">⚡ Multimodal Hybrid (Uploaded Photo + Aesthetic Text)</option>
             </select>
           </div>
         </div>
 
-        <div id="textQueryGroup" class="form-group">
-          <label class="form-label">Aesthetic & Style Query</label>
-          <input id="searchQuery" class="form-input" type="text" placeholder="e.g. bright sunlit modern bedroom with ocean view and wooden ceiling" value="modern sea view villa with private pool">
+        <!-- File Upload Dropzone (Visible in UPLOAD and MULTIMODAL modes) -->
+        <div id="imageUploadGroup" class="form-group" style="display: none;">
+          <label class="form-label">Reference Search Image</label>
+          <div id="dropzoneBox" class="dropzone" onclick="document.getElementById('imageFileInput').click()">
+            <div id="dropzoneText">📁 <b>Click or drag an image here</b> to search by visual style (JPEG, PNG, WebP)</div>
+            <input id="imageFileInput" type="file" accept="image/*" style="display: none;" onchange="handleImageSelected(event)">
+            <img id="imagePreview" class="dropzone-preview" alt="Selected Preview">
+          </div>
         </div>
 
-        <div id="imageKeyGroup" class="form-group" style="display: none;">
-          <label class="form-label">Reference Image Object Key</label>
-          <input id="searchImageKey" class="form-input" type="text" placeholder="e.g. properties/villa-101/pool.jpg">
+        <!-- Aesthetic Text Query -->
+        <div id="textQueryGroup" class="form-group">
+          <label class="form-label">Aesthetic & Style Query (Free-Text with LLM Parser)</label>
+          <input id="searchQuery" class="form-input" type="text" placeholder="e.g. luxury cliffside villa in Santorini with private infinity pool under $450 for 4 guests" value="luxury sea view villa in Santorini with private pool under $500 for 4 guests">
+        </div>
+
+        <!-- Structured Hard Filters Form -->
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">📍 Destination City (Pre-Filter)</label>
+            <input id="filterCity" class="form-input" type="text" placeholder="e.g. Santorini, Paris, Rome">
+          </div>
+          <div class="form-group">
+            <label class="form-label">🌍 Country (Pre-Filter)</label>
+            <input id="filterCountry" class="form-input" type="text" placeholder="e.g. Greece, Switzerland, France">
+          </div>
+          <div class="form-group">
+            <label class="form-label">👥 Min Guests (Capacity Filter)</label>
+            <input id="filterGuests" class="form-input" type="number" placeholder="2" min="1">
+          </div>
+          <div class="form-group">
+            <label class="form-label">💰 Max Price / Night ($)</label>
+            <input id="filterPrice" class="form-input" type="number" placeholder="500">
+          </div>
         </div>
 
         <div class="form-row">
           <div class="form-group">
-            <label class="form-label">Destination City (Hard Filter)</label>
-            <input id="filterCity" class="form-input" type="text" placeholder="e.g. Santorini or Bali">
+            <label class="form-label">🏡 Property Type</label>
+            <select id="filterPropertyType" class="form-select">
+              <option value="">Any Type</option>
+              <option value="VILLA">Villa</option>
+              <option value="APARTMENT">Apartment</option>
+              <option value="HOUSE">House</option>
+              <option value="CHALET">Chalet</option>
+              <option value="STUDIO">Studio</option>
+              <option value="PENTHOUSE">Penthouse</option>
+            </select>
           </div>
           <div class="form-group">
-            <label class="form-label">Min Guests</label>
-            <input id="filterGuests" class="form-input" type="number" placeholder="2" min="1">
+            <label class="form-label">🌅 Preferred View Type</label>
+            <select id="filterViewType" class="form-select">
+              <option value="">Any View</option>
+              <option value="SEA_VIEW">Sea / Ocean View</option>
+              <option value="CITY_SKYLINE">City Skyline</option>
+              <option value="MOUNTAIN">Mountain View</option>
+              <option value="GARDEN">Garden / Courtyard</option>
+              <option value="POOL_VIEW">Pool View</option>
+            </select>
           </div>
           <div class="form-group">
-            <label class="form-label">Max Price / Night ($)</label>
-            <input id="filterPrice" class="form-input" type="number" placeholder="500">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Result Page Size</label>
+            <label class="form-label">Page Size</label>
             <select id="pageSize" class="form-select">
               <option value="6">6 results</option>
               <option value="12" selected>12 results</option>
@@ -519,27 +572,29 @@
           </div>
         </div>
 
+        <!-- Scene Focus Chips -->
         <div class="form-group">
-          <label class="form-label">Require Specific Scene Focus</label>
+          <label class="form-label">🛋️ Require Specific Scene Focus</label>
           <div class="chips-group">
-            <label class="chip"><input type="checkbox" name="reqScene" value="BEDROOM"><span>🛏️ Bedroom</span></label>
             <label class="chip"><input type="checkbox" name="reqScene" value="POOL"><span>🏊 Private Pool</span></label>
             <label class="chip"><input type="checkbox" name="reqScene" value="VIEW"><span>🌅 Panoramic View</span></label>
+            <label class="chip"><input type="checkbox" name="reqScene" value="BALCONY"><span>🌿 Balcony / Terrace</span></label>
+            <label class="chip"><input type="checkbox" name="reqScene" value="BEDROOM"><span>🛏️ Luxury Bedroom</span></label>
             <label class="chip"><input type="checkbox" name="reqScene" value="LIVING_ROOM"><span>🛋️ Living Area</span></label>
-            <label class="chip"><input type="checkbox" name="reqScene" value="BATHROOM"><span>🛁 Luxury Bath</span></label>
+            <label class="chip"><input type="checkbox" name="reqScene" value="BATHROOM"><span>🛁 Spa Bath</span></label>
             <label class="chip"><input type="checkbox" name="reqScene" value="WORKSPACE"><span>💼 Dedicated Desk</span></label>
           </div>
         </div>
 
         <div style="display: flex; gap: 12px; margin-top: 1.5rem;">
-          <button class="btn btn-primary" onclick="executeVisualSearch()">🚀 Run Visual Search</button>
-          <button class="btn btn-secondary" onclick="resetSearchFilters()">Reset</button>
+          <button class="btn btn-primary" onclick="executeVisualSearch()">🚀 Execute Filtered Visual Search</button>
+          <button class="btn btn-secondary" onclick="resetSearchFilters()">Reset Form</button>
         </div>
       </div>
 
-      <!-- Live Search Results Grid -->
+      <!-- Live Search Results Header & Grid -->
       <div id="searchResultsHeader" style="margin-top: 2rem; display: flex; justify-content: space-between; align-items: center;">
-        <h3 style="font-size: 1.1rem; font-weight: 700;">Retrieved Properties (<span id="resultsCount">0</span>)</h3>
+        <h3 style="font-size: 1.15rem; font-weight: 700;">Retrieved Properties (<span id="resultsCount">0</span>)</h3>
         <span id="searchLatency" style="font-size: 0.85rem; color: var(--text-dim); font-family: var(--font-mono);"></span>
       </div>
 
@@ -552,7 +607,7 @@
     <section id="perception-view" class="view-panel">
       <div class="card">
         <div class="card-title">🦙 Ollama Multimodal Vision Model Inspector</div>
-        <div class="card-desc">Detected local vision models from Ollama (e.g. Llava, Llama-3.2-Vision, Moondream) running on this machine.</div>
+        <div class="card-desc">Detected local vision models from Ollama (e.g. Minimax-M3, Llama-3.2-Vision, Qwen2-VL) running on this machine.</div>
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">Active VLM Model</label>
@@ -560,8 +615,6 @@
               <option value="minimax-m3:cloud" selected>minimax-m3:cloud (Active Vision Model)</option>
               <option value="llama3.2-vision:latest">llama3.2-vision:latest</option>
               <option value="qwen2-vl:7b">qwen2-vl:7b</option>
-              <option value="llava:latest">llava:latest</option>
-              <option value="moondream:latest">moondream:latest</option>
             </select>
           </div>
           <div class="form-group">
@@ -569,7 +622,7 @@
             <input class="form-input" type="text" value="http://localhost:11434" readonly>
           </div>
           <div class="form-group" style="display: flex; align-items: flex-end;">
-            <button class="btn btn-secondary" style="width: 100%;" onclick="refreshOllamaStatus()">🔄 Refresh Models</button>
+            <button class="btn btn-secondary" style="width: 100%;" onclick="refreshSystemStatus()">🔄 Refresh System Status</button>
           </div>
         </div>
       </div>
@@ -709,11 +762,37 @@
   </main>
 
   <script>
+    let selectedImageFile = null;
+
     document.addEventListener('DOMContentLoaded', () => {
-      refreshOllamaStatus();
+      refreshSystemStatus();
+      setupDragAndDrop();
     });
 
-    async function refreshOllamaStatus() {
+    async function refreshSystemStatus() {
+      // 1. Check OpenCLIP Microservice
+      try {
+        const res = await fetch('/api/v1/vision/admin/clip/status');
+        const json = await res.json();
+        const data = json.data;
+        const badge = document.getElementById('clipStatusBadge');
+        const dot = document.getElementById('clipDot');
+        const text = document.getElementById('clipStatusText');
+
+        if (data && data.available) {
+          badge.className = 'status-badge online';
+          dot.className = 'status-dot online';
+          text.textContent = `OpenCLIP (ViT-B-32 512d): Online`;
+        } else {
+          badge.className = 'status-badge offline';
+          dot.className = 'status-dot offline';
+          text.textContent = 'OpenCLIP: Offline (Port 8000)';
+        }
+      } catch (err) {
+        document.getElementById('clipStatusText').textContent = 'OpenCLIP: Standby';
+      }
+
+      // 2. Check Ollama VLM
       try {
         const res = await fetch('/api/v1/vision/admin/ollama/status');
         const json = await res.json();
@@ -726,7 +805,7 @@
         if (data && data.available) {
           badge.className = 'status-badge online';
           dot.className = 'status-dot online';
-          text.textContent = `Ollama: Online (${data.installedCount} models)`;
+          text.textContent = `Ollama: Online (${data.installedCount || 1} models)`;
 
           if (data.installedModels && data.installedModels.length > 0) {
             select.innerHTML = data.installedModels.map(m => `<option value="${m}">${m}</option>`).join('');
@@ -734,7 +813,7 @@
         } else {
           badge.className = 'status-badge offline';
           dot.className = 'status-dot offline';
-          text.textContent = 'Ollama: Fallback Heuristic Mode';
+          text.textContent = 'Ollama: Fallback Mode';
         }
       } catch (err) {
         document.getElementById('ollamaStatusText').textContent = 'Ollama: Standby';
@@ -751,12 +830,12 @@
     function toggleSearchInputs() {
       const mode = document.getElementById('searchMode').value;
       const textGroup = document.getElementById('textQueryGroup');
-      const imgGroup = document.getElementById('imageKeyGroup');
+      const imgGroup = document.getElementById('imageUploadGroup');
 
       if (mode === 'TEXT') {
         textGroup.style.display = 'block';
         imgGroup.style.display = 'none';
-      } else if (mode === 'IMAGE') {
+      } else if (mode === 'UPLOAD') {
         textGroup.style.display = 'none';
         imgGroup.style.display = 'block';
       } else {
@@ -765,57 +844,93 @@
       }
     }
 
+    function setupDragAndDrop() {
+      const dropzone = document.getElementById('dropzoneBox');
+      ['dragenter', 'dragover'].forEach(name => {
+        dropzone.addEventListener(name, (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+      });
+      ['dragleave', 'drop'].forEach(name => {
+        dropzone.addEventListener(name, (e) => { e.preventDefault(); dropzone.classList.remove('dragover'); });
+      });
+      dropzone.addEventListener('drop', (e) => {
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          handleFile(e.dataTransfer.files[0]);
+        }
+      });
+    }
+
+    function handleImageSelected(event) {
+      if (event.target.files && event.target.files.length > 0) {
+        handleFile(event.target.files[0]);
+      }
+    }
+
+    function handleFile(file) {
+      selectedImageFile = file;
+      const preview = document.getElementById('imagePreview');
+      const text = document.getElementById('dropzoneText');
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        preview.src = e.target.result;
+        preview.style.display = 'inline-block';
+        text.innerHTML = `✅ <b>${file.name}</b> (${(file.size / 1024).toFixed(0)} KB) selected. Click to replace.`;
+      };
+      reader.readAsDataURL(file);
+    }
+
     async function executeVisualSearch() {
       const mode = document.getElementById('searchMode').value;
       const query = document.getElementById('searchQuery').value;
-      const imageKey = document.getElementById('searchImageKey').value;
       const city = document.getElementById('filterCity').value;
+      const country = document.getElementById('filterCountry').value;
       const minGuests = document.getElementById('filterGuests').value;
       const maxPrice = document.getElementById('filterPrice').value;
+      const propertyType = document.getElementById('filterPropertyType').value;
+      const viewType = document.getElementById('filterViewType').value;
       const pageSize = document.getElementById('pageSize').value;
 
       const checkedScenes = Array.from(document.querySelectorAll('input[name="reqScene"]:checked')).map(cb => cb.value);
 
-      let endpoint = '/api/v1/vision/search/text';
-      let payload = {
-        query: query,
-        pageSize: parseInt(pageSize) || 12,
-        city: city || null,
-        minGuests: minGuests ? parseInt(minGuests) : null,
-        maxPricePerNight: maxPrice ? parseFloat(maxPrice) : null,
-        requiredSceneTypes: checkedScenes.length > 0 ? checkedScenes : null
-      };
-
-      if (mode === 'IMAGE') {
-        endpoint = '/api/v1/vision/search/image';
-        payload = {
-          referenceObjectKey: imageKey || 'test-image.jpg',
-          pageSize: parseInt(pageSize) || 12,
-          city: city || null,
-          minGuests: minGuests ? parseInt(minGuests) : null,
-          maxPricePerNight: maxPrice ? parseFloat(maxPrice) : null,
-          requiredSceneTypes: checkedScenes.length > 0 ? checkedScenes : null
-        };
-      } else if (mode === 'MULTIMODAL') {
-        endpoint = '/api/v1/vision/search/multimodal';
-        payload = {
-          referenceObjectKey: imageKey || 'test-image.jpg',
-          textQuery: query,
-          pageSize: parseInt(pageSize) || 12,
-          city: city || null,
-          minGuests: minGuests ? parseInt(minGuests) : null,
-          maxPricePerNight: maxPrice ? parseFloat(maxPrice) : null,
-          requiredSceneTypes: checkedScenes.length > 0 ? checkedScenes : null
-        };
-      }
-
       const start = performance.now();
       try {
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+        let res;
+        if (mode === 'UPLOAD' || (mode === 'MULTIMODAL' && selectedImageFile)) {
+          // Send multipart file upload
+          const formData = new FormData();
+          formData.append('file', selectedImageFile);
+          if (mode === 'MULTIMODAL' && query) formData.append('textQuery', query);
+          if (city) formData.append('city', city);
+          if (country) formData.append('country', country);
+          if (minGuests) formData.append('minGuests', minGuests);
+          if (maxPrice) formData.append('maxPricePerNight', maxPrice);
+          if (checkedScenes.length > 0) {
+            checkedScenes.forEach(s => formData.append('requiredScenes', s));
+          }
+          formData.append('pageSize', pageSize);
+
+          res = await fetch('/api/v1/vision/search/upload', {
+            method: 'POST',
+            body: formData
+          });
+        } else {
+          // Standard JSON Text Search
+          const payload = {
+            query: query,
+            pageSize: parseInt(pageSize) || 12,
+            city: city || null,
+            country: country || null,
+            minGuests: minGuests ? parseInt(minGuests) : null,
+            maxPricePerNight: maxPrice ? parseFloat(maxPrice) : null,
+            requiredSceneTypes: checkedScenes.length > 0 ? checkedScenes : null
+          };
+
+          res = await fetch('/api/v1/vision/search/text', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+        }
+
         const data = await res.json();
         const latency = (performance.now() - start).toFixed(0);
         document.getElementById('searchLatency').textContent = `Latency: ${latency}ms`;
@@ -852,7 +967,7 @@
             <div class="prop-location">📍 ${r.city || 'Santorini'}, ${r.country || 'Greece'} • Max ${r.maxGuests || 2} guests</div>
             <div class="prop-price">$${r.pricePerNight || 350} <span style="font-size: 0.75rem; color: var(--text-dim); font-weight: normal;">/ night</span></div>
             
-            <div class="prop-explanation">"${r.visualExplanation || 'Matches aesthetic style and verified room features.'}"</div>
+            <div class="prop-explanation">"${r.visualExplanation || 'Matches visual aesthetic style and verified room features.'}"</div>
 
             <div class="tag-container">
               ${(r.matchedFeatures || ['pool', 'sea view']).slice(0, 3).map(f => `<span class="mini-tag">✓ ${f}</span>`).join('')}
@@ -959,8 +1074,15 @@
     function resetSearchFilters() {
       document.getElementById('searchQuery').value = '';
       document.getElementById('filterCity').value = '';
+      document.getElementById('filterCountry').value = '';
       document.getElementById('filterGuests').value = '';
       document.getElementById('filterPrice').value = '';
+      document.getElementById('filterPropertyType').value = '';
+      document.getElementById('filterViewType').value = '';
+      document.getElementById('imageFileInput').value = '';
+      document.getElementById('imagePreview').style.display = 'none';
+      document.getElementById('dropzoneText').innerHTML = '📁 <b>Click or drag an image here</b> to search by visual style (JPEG, PNG, WebP)';
+      selectedImageFile = null;
       document.querySelectorAll('input[name="reqScene"]').forEach(cb => cb.checked = false);
     }
   </script>

@@ -10,8 +10,11 @@ import com.luna.aggarly.vision.entity.PropertyVisualProfile;
 import com.luna.aggarly.vision.repository.PropertyImageAiMetadataRepository;
 import com.luna.aggarly.vision.repository.PropertyVisualProfileRepository;
 import com.luna.aggarly.vision.search.records.AggregatedPropertyScore;
+import com.luna.aggarly.vision.search.records.ChannelSearchResult;
 import com.luna.aggarly.vision.search.records.FusedImageCandidate;
+import com.luna.aggarly.vision.search.records.StageRankingDiagnostics;
 import com.luna.aggarly.vision.search.records.ThreeChannelResults;
+import com.luna.aggarly.vision.search.records.VisionSearchExecution;
 import com.luna.aggarly.vision.search.records.VisionSearchQuery;
 import com.luna.aggarly.vision.search.records.VisionSearchResult;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +24,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -46,20 +52,62 @@ public class VisionSearchOrchestrator {
     private final PropertyVisualProfileRepository profileRepository;
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
+    private final ScoreCalibrator scoreCalibrator;
 
     @Transactional(readOnly = true)
     public List<VisionSearchResult> search(VisionSearchQuery query) {
+        return searchWithDiagnostics(query).results();
+    }
+
+    @Transactional(readOnly = true)
+    public VisionSearchExecution searchWithDiagnostics(VisionSearchQuery query) {
         log.info("Executing Vision Search query: text='{}', mode={}, pageSize={}",
                 query.rawText(), query.searchMode(), query.pageSize());
 
-        // Stage 1: Compute query vectors
-        VisionQueryEmbedder.QueryVectors queryVectors = queryEmbedder.embed(query);
+        Map<String, Long> latencies = new LinkedHashMap<>();
 
-        // Stage 2: Three-channel parallel Qdrant retrieval
+        long t0 = System.nanoTime();
+        VisionQueryEmbedder.QueryVectors queryVectors = queryEmbedder.embed(query);
+        latencies.put("embedding", (System.nanoTime() - t0) / 1_000_000);
+
+        long t1 = System.nanoTime();
         ThreeChannelResults channelResults = qdrantSearchService.searchAllChannels(queryVectors, query.hardFilters());
+        latencies.put("qdrant_retrieval", (System.nanoTime() - t1) / 1_000_000);
+
+        List<UUID> imageChannelRanking = channelResults.imageChannel() != null ?
+                channelResults.imageChannel().stream()
+                        .sorted((a, b) -> Float.compare(b.score(), a.score()))
+                        .map(ChannelSearchResult::propertyId)
+                        .filter(Objects::nonNull)
+                        .distinct()
+                        .toList() : List.of();
+
+        List<UUID> captionChannelRanking = channelResults.captionChannel() != null ?
+                channelResults.captionChannel().stream()
+                        .sorted((a, b) -> Float.compare(b.score(), a.score()))
+                        .map(ChannelSearchResult::propertyId)
+                        .filter(Objects::nonNull)
+                        .distinct()
+                        .toList() : List.of();
+
+        List<UUID> descriptionChannelRanking = channelResults.descriptionChannel() != null ?
+                channelResults.descriptionChannel().stream()
+                        .sorted((a, b) -> Float.compare(b.score(), a.score()))
+                        .map(ChannelSearchResult::propertyId)
+                        .filter(Objects::nonNull)
+                        .distinct()
+                        .toList() : List.of();
 
         // Stage 3: Score fusion across image and caption vectors
+        long t2 = System.nanoTime();
         List<FusedImageCandidate> fusedImages = scoreFusionService.fuse(channelResults, query.searchMode());
+        latencies.put("score_fusion", (System.nanoTime() - t2) / 1_000_000);
+
+        List<UUID> fusedRanking = fusedImages.stream()
+                .map(FusedImageCandidate::propertyId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
 
         // Collect all candidate property UUIDs from both image channels and description channel
         Set<UUID> candidatePropertyIds = new HashSet<>();
@@ -73,6 +121,7 @@ public class VisionSearchOrchestrator {
         }
 
         // Stage 4: Strict business constraint & availability barrier
+        long t3 = System.nanoTime();
         List<Property> validProperties = candidateMerger.filterAndMergeCandidates(candidatePropertyIds, query.hardFilters());
         Set<UUID> validPropertyIds = validProperties.stream().map(Property::getId).collect(Collectors.toSet());
 
@@ -81,42 +130,68 @@ public class VisionSearchOrchestrator {
                 .filter(img -> validPropertyIds.contains(img.propertyId()))
                 .toList();
 
-        var validDescResults = channelResults.descriptionChannel().stream()
+        var validDescResults = channelResults.descriptionChannel() != null ? channelResults.descriptionChannel().stream()
                 .filter(res -> validPropertyIds.contains(res.propertyId()))
-                .toList();
+                .toList() : List.<ChannelSearchResult>of();
 
         // Stage 5: Category-Aware Property Score Aggregation
         List<AggregatedPropertyScore> aggregatedScores = scoreAggregator.aggregate(
                 validFusedImages, validDescResults, query.hardFilters()
         );
 
+        List<UUID> aggregatedRanking = aggregatedScores.stream()
+                .map(AggregatedPropertyScore::propertyId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
         // Stage 6: Contextual & Usability Filter
         List<AggregatedPropertyScore> filtered = contextualFilter.filter(aggregatedScores, query);
+        latencies.put("aggregation_and_filtering", (System.nanoTime() - t3) / 1_000_000);
 
         // Stage 7: Cheap ML Reranker (Stage 1 fast ranking)
+        long t4 = System.nanoTime();
         List<AggregatedPropertyScore> mlReranked = cheapMlReranker.rerank(filtered, query, 20);
+        latencies.put("ml_reranking", (System.nanoTime() - t4) / 1_000_000);
+
+        List<UUID> mlRerankedRanking = mlReranked.stream()
+                .map(AggregatedPropertyScore::propertyId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
 
         // Stage 8: Optional LLM Reranker (Stage 2 deep explanation)
+        long t5 = System.nanoTime();
         var rerankedItems = visualReranker.rerank(mlReranked, query);
+        latencies.put("llm_reranking", (System.nanoTime() - t5) / 1_000_000);
 
-        // Stage 9: Cursor Pagination & Result Formatting
-        VisionPaginationService.CursorData cursorData = paginationService.decodeCursor(query.cursor());
-        int startOffset = cursorData.offset();
-        int endOffset = Math.min(startOffset + query.pageSize(), rerankedItems.size());
+        List<UUID> finalRanking = rerankedItems.stream()
+                .map(item -> item.propertyScore().propertyId())
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
 
-        List<VisionSearchResult> finalResults = new ArrayList<>();
-        if (startOffset < rerankedItems.size()) {
-            var pagedItems = rerankedItems.subList(startOffset, endOffset);
-            for (var item : pagedItems) {
-                finalResults.add(buildSearchResultDto(item));
-            }
-        }
+        // Stage 9: Final Response Pagination & Entity Hydration
+        List<VisionSearchResult> results = rerankedItems.stream()
+                .limit(query.pageSize())
+                .map(this::toSearchResult)
+                .toList();
 
-        log.info("Vision Search completed. Returning {} results (total matching: {})", finalResults.size(), rerankedItems.size());
-        return finalResults;
+        StageRankingDiagnostics diagnostics = new StageRankingDiagnostics(
+                imageChannelRanking,
+                captionChannelRanking,
+                descriptionChannelRanking,
+                fusedRanking,
+                aggregatedRanking,
+                mlRerankedRanking,
+                finalRanking,
+                latencies
+        );
+
+        return new VisionSearchExecution(results, diagnostics);
     }
 
-    private VisionSearchResult buildSearchResultDto(CrossModalVisualReranker.RerankedItem item) {
+    private VisionSearchResult toSearchResult(CrossModalVisualReranker.RerankedItem item) {
         AggregatedPropertyScore cand = item.propertyScore();
         Property prop = propertyRepository.findById(cand.propertyId()).orElse(null);
         PropertyVisualProfile profile = profileRepository.findByPropertyId(cand.propertyId()).orElse(null);
@@ -155,6 +230,10 @@ public class VisionSearchOrchestrator {
             } catch (Exception ignored) {}
         }
 
+        float calibratedFinal = scoreCalibrator.calibrate(item.finalScore());
+        float calibratedVisual = scoreCalibrator.calibrate(cand.targetSceneScore());
+        float calibratedDesc = cand.descriptionChannelScore() > 0 ? scoreCalibrator.calibrate(cand.descriptionChannelScore()) : 0.0f;
+
         return new VisionSearchResult(
                 cand.propertyId(),
                 title,
@@ -162,9 +241,9 @@ public class VisionSearchOrchestrator {
                 country,
                 price,
                 guests,
-                item.finalScore(),
-                cand.targetSceneScore(),
-                cand.descriptionChannelScore(),
+                calibratedFinal,
+                calibratedVisual,
+                calibratedDesc,
                 bestImageId,
                 imageUrl,
                 sceneType,

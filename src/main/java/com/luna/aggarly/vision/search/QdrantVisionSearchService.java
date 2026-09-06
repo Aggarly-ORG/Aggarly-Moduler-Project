@@ -112,13 +112,55 @@ public class QdrantVisionSearchService {
     }
 
     private QdrantFilter buildImageFilter(VisionSearchFilters filters) {
-        return null;
+        List<QdrantCondition> conditions = new ArrayList<>();
+        // 1. Only retrieve approved images
+        conditions.add(QdrantCondition.equals("moderationStatus", "APPROVED"));
+
+        if (filters != null) {
+            // 2. Strict City Pre-filter
+            if (filters.city() != null && !filters.city().isBlank()) {
+                conditions.add(QdrantCondition.equals("city", filters.city().trim().toLowerCase()));
+            }
+
+            // 3. Strict Country Pre-filter
+            if (filters.country() != null && !filters.country().isBlank()) {
+                conditions.add(QdrantCondition.equals("country", filters.country().trim().toLowerCase()));
+            }
+
+            // 4. Max Price Ceiling
+            if (filters.maxPricePerNight() != null && filters.maxPricePerNight() > 0) {
+                conditions.add(QdrantCondition.rangeLte("pricePerNight", filters.maxPricePerNight()));
+            }
+
+            // 5. Min Guest Capacity
+            if (filters.minGuests() != null && filters.minGuests() > 0) {
+                conditions.add(QdrantCondition.rangeGte("maxGuests", filters.minGuests()));
+            }
+
+            // 6. Specific Scene Type (e.g. POOL, BALCONY)
+            if (filters.requiredSceneTypes() != null && filters.requiredSceneTypes().size() == 1) {
+                conditions.add(QdrantCondition.equals("sceneType", filters.requiredSceneTypes().get(0)));
+            }
+        }
+
+        return conditions.isEmpty() ? null : QdrantFilter.must(conditions);
     }
 
     private QdrantFilter buildDescriptionFilter(VisionSearchFilters filters) {
         List<QdrantCondition> conditions = new ArrayList<>();
-        if (filters != null && filters.city() != null && !filters.city().isBlank()) {
-            conditions.add(QdrantCondition.equals("city", filters.city()));
+        if (filters != null) {
+            if (filters.city() != null && !filters.city().isBlank()) {
+                conditions.add(QdrantCondition.equals("city", filters.city().trim().toLowerCase()));
+            }
+            if (filters.country() != null && !filters.country().isBlank()) {
+                conditions.add(QdrantCondition.equals("country", filters.country().trim().toLowerCase()));
+            }
+            if (filters.maxPricePerNight() != null && filters.maxPricePerNight() > 0) {
+                conditions.add(QdrantCondition.rangeLte("pricePerNight", filters.maxPricePerNight()));
+            }
+            if (filters.minGuests() != null && filters.minGuests() > 0) {
+                conditions.add(QdrantCondition.rangeGte("maxGuests", filters.minGuests()));
+            }
         }
         return conditions.isEmpty() ? null : QdrantFilter.must(conditions);
     }

@@ -8,6 +8,10 @@ import java.util.UUID;
 public record ConversationParticipantResponse(
         UUID id,
         UUID userId,
+        /** Resolved from User.displayName → firstName + lastName → username */
+        String displayName,
+        String username,
+        String avatarUrl,
         ParticipantRole role,
         Instant lastReadAt,
         int unreadCount,

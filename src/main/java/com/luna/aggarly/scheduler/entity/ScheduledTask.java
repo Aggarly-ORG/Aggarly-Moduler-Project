@@ -96,6 +96,10 @@ public class ScheduledTask {
     @Builder.Default
     private Integer planVersion = 1;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "origin_context", columnDefinition = "jsonb")
+    private String originContext;
+
     @Version
     @Column(nullable = false)
     private long version;

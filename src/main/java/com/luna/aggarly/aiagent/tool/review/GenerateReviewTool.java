@@ -11,9 +11,9 @@ import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
-public class GenerateReviewTool implements Tool<GenerateReviewTool.GenerateReviewRequest, String> {
+public class GenerateReviewTool implements Tool<GenerateReviewTool.Params, String> {
 
-    public record GenerateReviewRequest(
+    public record Params(
             UUID bookingId,
             List<String> keyPoints,
             int rating
@@ -30,8 +30,8 @@ public class GenerateReviewTool implements Tool<GenerateReviewTool.GenerateRevie
     }
 
     @Override
-    public Class<GenerateReviewRequest> parameterType() {
-        return GenerateReviewRequest.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -40,8 +40,9 @@ public class GenerateReviewTool implements Tool<GenerateReviewTool.GenerateRevie
     }
 
     @Override
-    public ToolResult<String> execute(GenerateReviewRequest params, UserPrincipal user) {
-        String draft = "Our stay was wonderful! " + String.join(". ", params.keyPoints()) + ". Highly recommended!";
+    public ToolResult<String> execute(Params params, UserPrincipal user) {
+        String points = (params != null && params.keyPoints() != null) ? String.join(". ", params.keyPoints()) : "Great stay";
+        String draft = "Our stay was wonderful! " + points + ". Highly recommended!";
         return ToolResult.ok(draft);
     }
 }

@@ -13,9 +13,9 @@ import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
-public class ValidateCouponTool implements Tool<ValidateCouponTool.ValidateCouponRequest, CouponValidationResponse> {
+public class ValidateCouponTool implements Tool<ValidateCouponTool.Params, CouponValidationResponse> {
 
-    public record ValidateCouponRequest(
+    public record Params(
             String code,
             BigDecimal subtotal
     ) {}
@@ -33,8 +33,8 @@ public class ValidateCouponTool implements Tool<ValidateCouponTool.ValidateCoupo
     }
 
     @Override
-    public Class<ValidateCouponRequest> parameterType() {
-        return ValidateCouponRequest.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -43,7 +43,7 @@ public class ValidateCouponTool implements Tool<ValidateCouponTool.ValidateCoupo
     }
 
     @Override
-    public ToolResult<CouponValidationResponse> execute(ValidateCouponRequest params, UserPrincipal user) {
+    public ToolResult<CouponValidationResponse> execute(Params params, UserPrincipal user) {
         UUID userId = user != null ? user.getUserId() : null;
         CouponValidationResponse response = couponService.validateCoupon(params.code(), params.subtotal(), userId);
         return ToolResult.ok(response);

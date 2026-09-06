@@ -3,15 +3,17 @@ package com.luna.aggarly.aiagent.engine;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.luna.aggarly.aiagent.agent.Agent;
+import com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher;
 import com.luna.aggarly.aiagent.engine.model.LumenAgentResponse;
 import com.luna.aggarly.aiagent.engine.model.LumenResponseBlock;
 import com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter;
+import com.luna.aggarly.aiagent.engine.records.ChatMessage;
 import com.luna.aggarly.aiagent.engine.records.ClassifiedIntent;
 import com.luna.aggarly.aiagent.engine.records.ConversationContext;
 import com.luna.aggarly.aiagent.engine.records.SupervisorDecision;
-import com.luna.aggarly.aiagent.engine.records.ChatMessage;
 import com.luna.aggarly.user.security.UserPrincipal;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -23,18 +25,21 @@ import java.util.stream.Collectors;
 @Component
 public class PlanningEngine {
 
-    private static final int MAX_SUPERVISOR_TURNS = 4;
+    private static final int MAX_SUPERVISOR_TURNS = 5;
 
     private final LlmClient llmClient;
     private final ObjectMapper objectMapper;
     private final Map<String, Agent> agentRegistry;
     private final String planningModel;
+    private final AgentActivityPublisher activityPublisher;
 
     public PlanningEngine(
             LlmClient llmClient,
             List<Agent> agents,
+            @Autowired(required = false) AgentActivityPublisher activityPublisher,
             @Value("${aggarly.ai.planning-model:nemotron-3-super:cloud}") String planningModel) {
         this.llmClient = llmClient;
+        this.activityPublisher = activityPublisher;
         this.planningModel = planningModel;
         this.objectMapper = new ObjectMapper()
                 .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
@@ -46,15 +51,21 @@ public class PlanningEngine {
     }
 
     public AgentResponse executePlan(ClassifiedIntent intent, ConversationContext context, UserPrincipal user) {
-        log.info("PlanningEngine dynamically executing plan for: {}", intent.rawMessage());
+        log.info("PlanningEngine dynamically executing multi-step plan for: {}", intent.rawMessage());
+        long planStartTime = System.currentTimeMillis();
+        UUID convId = context != null ? context.conversationId() : null;
+
+        if (activityPublisher != null && convId != null) {
+            activityPublisher.publishThinkingStart(convId, "🧠 Planning multi-agent execution strategy...");
+        }
 
         String agentCapabilities = agentRegistry.values().stream()
                 .map(a -> "- " + a.name() + ": " + a.description() + "\n  (Supported Tools: " + String.join(", ", a.supportedTools()) + ")")
                 .collect(Collectors.joining("\n"));
 
         String supervisorSystemPrompt = """
-            You are the Dynamic Planning Supervisor for Aggarly's luxury rental and concierge platform.
-            Your responsibility is to fulfill the user's multi-step request by delegating sub-tasks to specialized agents ONE AT A TIME.
+            You are the Dynamic Planning Supervisor for Aggarly's luxury rental and AI concierge platform.
+            Your responsibility is to fulfill complex multi-step user requests by delegating sub-tasks to specialized agents ONE AT A TIME.
 
             Specialized Agents & Their Roles:
             %s
@@ -62,23 +73,42 @@ public class PlanningEngine {
             ================================================================
             STANDARD MULTI-STEP WORKFLOW PATTERNS:
             ================================================================
-            1. Search & Book Workflow (e.g. "Find property for 2 guests then book from Jan 1-6"):
+            1. Search & Book Workflow (e.g. "Find villa in Alexandria and reserve for 3 guests"):
                - Step 1: Delegate to PropertyAgent to search listings for the requested location/dates/guests.
-               - Step 2: Once a property is found in the results, extract its exact 'Property ID', check-in date, check-out date, and guest count. Then delegate to BookingAgent:
+               - Step 2: Once a property is found in the results, extract its exact 'Property ID', dates, and guests. Then delegate to BookingAgent:
                  Task: "Create booking for property ID <propertyId> for <guests> guests from <checkIn> to <checkOut>"
                - Step 3: Output DONE once BookingAgent processes the booking or requests user confirmation.
 
-            2. Search & Travel / Weather Workflow (e.g. "Find villas in Santorini and check weather"):
+            2. Search & Visual Exploration Workflow (e.g. "Find penthouses with sunset sea views"):
+               - Step 1: Delegate to PropertyAgent to search matching listings.
+               - Step 2: Delegate to VisionAgent to run multimodal aesthetic and room tour similarity analysis.
+               - Step 3: Output DONE with rich visual recommendations.
+
+            3. Search & Travel Itinerary Workflow (e.g. "Find villas in Santorini and plan dining & weather"):
                - Step 1: Delegate to PropertyAgent to find listings in the destination.
                - Step 2: Delegate to TravelAgent to look up destination weather, attractions, or dining.
-               - Step 3: Output DONE with a combined summary.
+               - Step 3: Output DONE with a combined curated overview.
+
+            4. Automated Scheduling Workflow (e.g. "Monitor prices in Mykonos and alert me every Monday"):
+               - Step 1: Delegate to PropertyAgent to find target properties.
+               - Step 2: Delegate to SchedulingAgent to compile and register the recurring schedule.
+               - Step 3: Output DONE.
+
+            5. Host Management & Optimization:
+               - Delegate to HostAgent to analyze occupancy, dynamic pricing, earnings, or block calendar.
+
+            6. Administrative Tasks & Moderation:
+               - Delegate to AdminAgent for coupon creation, content moderation, or OCR extraction.
 
             ================================================================
-            LOOP PREVENTION RULES:
+            CRITICAL SUPERVISOR GUARDRAILS (STRICT):
             ================================================================
-            - NEVER delegate the exact same search or task to PropertyAgent multiple times. If PropertyAgent already found a property, PROCEED TO THE NEXT LOGICAL STEP (e.g. BookingAgent, TravelAgent, or DONE).
-            - Always extract and pass discovered Property IDs (UUIDs), dates, and parameters in 'taskDescription'.
-            - When all sub-tasks are addressed, output DONE immediately.
+            1. MAXIMUM ONE DELEGATION PER AGENT: Never delegate to the same agent more than once.
+               - If PropertyAgent already found properties, do NOT invoke PropertyAgent again.
+               - If BookingAgent already checked availability or initialized a booking, do NOT invoke BookingAgent again.
+            2. IMMEDIATE TERMINATION ON CONFIRMATION: If an agent states that an action requires confirmation or is pending confirmation (e.g. Booking confirmation required, cancellation quote, payment), you MUST IMMEDIATELY OUTPUT {"action": "DONE", ...}. NEVER try to re-delegate to any agent when confirmation is pending.
+            3. ALL-IN-ONE BOOKING INSTRUCTIONS: When delegating booking creation to BookingAgent, include all parameters at once: "Create booking for property ID <uuid> from <checkIn> to <checkOut> for <guests> guests". BookingAgent will handle the reservation atomically.
+            4. ONCE ALL INFO IS RETRIEVED: Output {"action": "DONE", "finalSummary": "..."} immediately. Repeating delegations to the same agent is strictly forbidden.
 
             ================================================================
             OUTPUT FORMAT:
@@ -114,12 +144,19 @@ public class PlanningEngine {
         List<String> allExecutedTools = new ArrayList<>();
         List<LumenResponseBlock> collectedBlocks = new ArrayList<>();
         Map<String, Object> collectedMetadata = new HashMap<>();
+        List<Map<String, Object>> executionPlanSteps = new ArrayList<>();
 
         Set<String> previousDelegations = new HashSet<>();
+        Map<String, Integer> agentDelegationCounts = new HashMap<>();
         String lastAgentNarrative = null;
 
         for (int turn = 1; turn <= MAX_SUPERVISOR_TURNS; turn++) {
             log.info("PlanningEngine turn {}/{}", turn, MAX_SUPERVISOR_TURNS);
+            long turnStartTime = System.currentTimeMillis();
+
+            if (activityPublisher != null && convId != null) {
+                activityPublisher.publishTurnStart(convId, "SupervisorPlanner", turn, MAX_SUPERVISOR_TURNS, 2, agentRegistry.size());
+            }
 
             List<ChatMessage> decisionMessages = List.of(
                     ChatMessage.system(supervisorSystemPrompt),
@@ -129,19 +166,21 @@ public class PlanningEngine {
             String decisionRaw = llmClient.chat(decisionMessages, planningModel);
             SupervisorDecision decision = parseSupervisorDecision(decisionRaw);
 
+            long turnDuration = System.currentTimeMillis() - turnStartTime;
+            if (activityPublisher != null && convId != null) {
+                List<String> proposed = decision != null && "DELEGATE".equalsIgnoreCase(decision.action()) && decision.agentName() != null
+                        ? List.of("delegate:" + decision.agentName())
+                        : List.of();
+                activityPublisher.publishTurnEnd(convId, "SupervisorPlanner", turn, MAX_SUPERVISOR_TURNS, turnDuration, proposed);
+            }
+
             if (decision == null || "DONE".equalsIgnoreCase(decision.action())) {
                 String summaryText = decision != null && decision.finalSummary() != null && !decision.finalSummary().isBlank()
                         ? decision.finalSummary()
                         : (lastAgentNarrative != null ? lastAgentNarrative : (decisionRaw != null && !decisionRaw.isBlank() ? decisionRaw : "I have completed your multi-step request."));
 
                 log.info("PlanningEngine completed execution gracefully on turn {}", turn);
-                String formattedJson = LumenResponseFormatter.formatResponse(summaryText, collectedBlocks);
-
-                return AgentResponse.builder()
-                        .text(formattedJson)
-                        .toolCalls(List.copyOf(allExecutedTools))
-                        .metadataJson(serializeMetadata(collectedMetadata))
-                        .build();
+                return finalizePlanResponse(summaryText, collectedBlocks, allExecutedTools, collectedMetadata, executionPlanSteps, planStartTime, convId, turn);
             }
 
             if ("DELEGATE".equalsIgnoreCase(decision.action())) {
@@ -149,20 +188,17 @@ public class PlanningEngine {
                 String taskDesc = decision.taskDescription() != null ? decision.taskDescription().trim() : "";
                 String delegationSignature = targetAgentName + ":" + taskDesc.toLowerCase();
 
-                // Loop Detection: prevent repeating identical delegation
-                if (previousDelegations.contains(delegationSignature)) {
-                    log.warn("PlanningEngine detected repeated delegation: {}. Breaking loop and finalizing.", delegationSignature);
+                // Loop Detection: prevent repeating identical delegation or delegating multiple times to the same agent
+                int count = agentDelegationCounts.getOrDefault(targetAgentName, 0);
+                if (count >= 1 || previousDelegations.contains(delegationSignature)) {
+                    log.warn("PlanningEngine detected repeated/redundant delegation to agent '{}' (count={}). Breaking loop and finalizing.", targetAgentName, count);
                     String summaryText = lastAgentNarrative != null
                             ? lastAgentNarrative
                             : "I have gathered the available details for your request.";
-                    String formattedJson = LumenResponseFormatter.formatResponse(summaryText, collectedBlocks);
-                    return AgentResponse.builder()
-                            .text(formattedJson)
-                            .toolCalls(List.copyOf(allExecutedTools))
-                            .metadataJson(serializeMetadata(collectedMetadata))
-                            .build();
+                    return finalizePlanResponse(summaryText, collectedBlocks, allExecutedTools, collectedMetadata, executionPlanSteps, planStartTime, convId, turn);
                 }
                 previousDelegations.add(delegationSignature);
+                agentDelegationCounts.put(targetAgentName, count + 1);
 
                 log.info("PlanningEngine delegating to {}: {}", targetAgentName, taskDesc);
 
@@ -194,32 +230,74 @@ public class PlanningEngine {
                         context
                 );
 
+                long stepStartTime = System.currentTimeMillis();
                 try {
                     AgentResponse stepResponse = targetAgent.handle(subIntent, context, user);
+                    long stepDuration = System.currentTimeMillis() - stepStartTime;
 
-                    if (stepResponse.getToolCalls() != null) {
-                        allExecutedTools.addAll(stepResponse.getToolCalls());
-                    }
-
-                    // If subagent triggered a confirmation gate (e.g. BookingAgent requires confirmation), suspend immediately and present gate
-                    if (stepResponse.isRequiresConfirmation()) {
-                        log.info("Sub-agent {} requires user confirmation. Returning confirmation gate immediately.", targetAgentName);
-                        return AgentResponse.awaitingConfirmation(
-                                stepResponse.getText(),
-                                stepResponse.getConfirmationToken(),
-                                stepResponse.getPendingToolName(),
-                                allExecutedTools
-                        );
-                    }
+                    List<String> stepTools = stepResponse.getToolCalls() != null ? stepResponse.getToolCalls() : List.of();
+                    allExecutedTools.addAll(stepTools);
 
                     // Extract structured facts & clean narrative
                     String stepRawText = stepResponse.getText();
                     ParsedAgentOutput parsedOutput = extractNarrativeAndBlocks(stepRawText);
-
                     lastAgentNarrative = parsedOutput.narrative();
+
+                    // Record execution step in plan
+                    Map<String, Object> planStep = new LinkedHashMap<>();
+                    planStep.put("stepNumber", executionPlanSteps.size() + 1);
+                    planStep.put("agentName", targetAgentName);
+                    planStep.put("task", taskDesc);
+                    planStep.put("status", "COMPLETED");
+                    planStep.put("durationMs", stepDuration);
+                    planStep.put("toolsExecuted", stepTools);
+                    planStep.put("summary", parsedOutput.narrative());
+                    executionPlanSteps.add(planStep);
 
                     // Deduplicate and collect blocks
                     addDeduplicatedBlocks(collectedBlocks, parsedOutput.blocks());
+
+                    // If subagent triggered a confirmation gate, finalize with rich confirmation block
+                    if (stepResponse.isRequiresConfirmation()) {
+                        log.info("Sub-agent {} requires user confirmation for {}. Returning rich confirmation gate.",
+                                targetAgentName, stepResponse.getPendingToolName());
+
+                        Map<String, Object> confData = new LinkedHashMap<>();
+                        confData.put("title", "Booking Confirmation Required");
+                        confData.put("message", parsedOutput.narrative() != null && !parsedOutput.narrative().isBlank()
+                                ? parsedOutput.narrative()
+                                : "Creating this booking requires your confirmation. Please confirm that you want to proceed.");
+                        confData.put("toolName", stepResponse.getPendingToolName());
+                        confData.put("pendingToolName", stepResponse.getPendingToolName());
+                        confData.put("confirmationToken", stepResponse.getConfirmationToken());
+                        confData.put("confirmEndpoint", "/api/v1/ai/confirm/" + stepResponse.getConfirmationToken());
+                        confData.put("rejectEndpoint", "/api/v1/ai/reject/" + stepResponse.getConfirmationToken());
+                        confData.put("actionType", stepResponse.getPendingToolName() != null ? stepResponse.getPendingToolName().toUpperCase().replace('.', '_') : "BOOKING_CREATE");
+                        confData.put("confirmLabel", "Confirm & Proceed");
+                        confData.put("cancelLabel", "Cancel");
+
+                        if (!containsConfirmation(collectedBlocks, stepResponse.getConfirmationToken())) {
+                            collectedBlocks.add(LumenResponseBlock.confirmation(confData));
+
+                            collectedBlocks.add(LumenResponseBlock.actions(List.of(
+                                    Map.of("id", "confirm-" + stepResponse.getConfirmationToken(), "label", "Confirm & Proceed", "variant", "primary", "action", "ai.confirm", "confirmationToken", stepResponse.getConfirmationToken()),
+                                    Map.of("id", "cancel-" + stepResponse.getConfirmationToken(), "label", "Cancel", "variant", "secondary", "action", "ai.cancel", "confirmationToken", stepResponse.getConfirmationToken())
+                            )));
+                        }
+
+                        return finalizePlanResponseWithConfirmation(
+                                parsedOutput.narrative() != null ? parsedOutput.narrative() : "Creating this booking requires your confirmation. Please confirm that you want to proceed.",
+                                collectedBlocks,
+                                allExecutedTools,
+                                collectedMetadata,
+                                executionPlanSteps,
+                                planStartTime,
+                                convId,
+                                turn,
+                                stepResponse.getConfirmationToken(),
+                                stepResponse.getPendingToolName()
+                        );
+                    }
 
                     globalContext.append(String.format(
                             "Result from %s:\n%s\n\n",
@@ -227,7 +305,6 @@ public class PlanningEngine {
                             parsedOutput.narrative()
                     ));
 
-                    // If structured entities were discovered, append explicit summary to global context
                     if (!parsedOutput.discoveredEntities().isEmpty()) {
                         globalContext.append("Discovered Entities for Next Steps:\n")
                                 .append(parsedOutput.discoveredEntities())
@@ -236,6 +313,17 @@ public class PlanningEngine {
 
                 } catch (Exception ex) {
                     log.error("Agent {} threw an exception during delegation", targetAgentName, ex);
+                    long stepDuration = System.currentTimeMillis() - stepStartTime;
+
+                    Map<String, Object> planStep = new LinkedHashMap<>();
+                    planStep.put("stepNumber", executionPlanSteps.size() + 1);
+                    planStep.put("agentName", targetAgentName);
+                    planStep.put("task", taskDesc);
+                    planStep.put("status", "FAILED");
+                    planStep.put("durationMs", stepDuration);
+                    planStep.put("error", ex.getMessage());
+                    executionPlanSteps.add(planStep);
+
                     globalContext.append(String.format("Delegation to %s encountered an error: %s\n", targetAgentName, ex.getMessage()));
                 }
             } else {
@@ -248,11 +336,88 @@ public class PlanningEngine {
         String finalSummary = lastAgentNarrative != null
                 ? lastAgentNarrative
                 : "I have gathered the available options and details for your request.";
-        String formattedJson = LumenResponseFormatter.formatResponse(finalSummary, collectedBlocks);
+
+        return finalizePlanResponse(finalSummary, collectedBlocks, allExecutedTools, collectedMetadata, executionPlanSteps, planStartTime, convId, MAX_SUPERVISOR_TURNS);
+    }
+
+    private AgentResponse finalizePlanResponse(
+            String summaryText,
+            List<LumenResponseBlock> collectedBlocks,
+            List<String> allExecutedTools,
+            Map<String, Object> collectedMetadata,
+            List<Map<String, Object>> executionPlanSteps,
+            long planStartTime,
+            UUID convId,
+            int turnsCount
+    ) {
+        long totalDuration = System.currentTimeMillis() - planStartTime;
+
+        // Persist structured Execution Plan as first block
+        if (!executionPlanSteps.isEmpty()) {
+            Map<String, Object> planBlockData = new LinkedHashMap<>();
+            planBlockData.put("title", "Multi-Agent Execution Plan");
+            planBlockData.put("totalSteps", executionPlanSteps.size());
+            planBlockData.put("totalDurationMs", totalDuration);
+            planBlockData.put("steps", executionPlanSteps);
+
+            collectedBlocks.add(0, LumenResponseBlock.executionPlan(planBlockData));
+            collectedMetadata.put("executionPlan", executionPlanSteps);
+        }
+
+        if (activityPublisher != null && convId != null) {
+            activityPublisher.publishSynthesisStart(convId, "SupervisorPlanner");
+            activityPublisher.publishSynthesisEnd(convId, "SupervisorPlanner", 150L, "Synthesized multi-agent results & attached execution plan");
+            activityPublisher.publishCompleted(convId, "SupervisorPlanner", totalDuration, allExecutedTools.size(), turnsCount);
+        }
+
+        String formattedJson = LumenResponseFormatter.formatResponse(summaryText, collectedBlocks);
 
         return AgentResponse.builder()
                 .text(formattedJson)
                 .toolCalls(List.copyOf(allExecutedTools))
+                .metadataJson(serializeMetadata(collectedMetadata))
+                .build();
+    }
+
+    private AgentResponse finalizePlanResponseWithConfirmation(
+            String summaryText,
+            List<LumenResponseBlock> collectedBlocks,
+            List<String> allExecutedTools,
+            Map<String, Object> collectedMetadata,
+            List<Map<String, Object>> executionPlanSteps,
+            long planStartTime,
+            UUID convId,
+            int turnsCount,
+            String confirmationToken,
+            String pendingToolName
+    ) {
+        long totalDuration = System.currentTimeMillis() - planStartTime;
+
+        if (!executionPlanSteps.isEmpty()) {
+            Map<String, Object> planBlockData = new LinkedHashMap<>();
+            planBlockData.put("title", "Multi-Agent Execution Plan");
+            planBlockData.put("totalSteps", executionPlanSteps.size());
+            planBlockData.put("totalDurationMs", totalDuration);
+            planBlockData.put("steps", executionPlanSteps);
+
+            collectedBlocks.add(0, LumenResponseBlock.executionPlan(planBlockData));
+            collectedMetadata.put("executionPlan", executionPlanSteps);
+        }
+
+        if (activityPublisher != null && convId != null) {
+            activityPublisher.publishSynthesisStart(convId, "SupervisorPlanner");
+            activityPublisher.publishSynthesisEnd(convId, "SupervisorPlanner", 150L, "Synthesized multi-agent results & awaiting guest confirmation");
+            activityPublisher.publishCompleted(convId, "SupervisorPlanner", totalDuration, allExecutedTools.size(), turnsCount);
+        }
+
+        String formattedJson = LumenResponseFormatter.formatResponse(summaryText, collectedBlocks);
+
+        return AgentResponse.builder()
+                .text(formattedJson)
+                .toolCalls(List.copyOf(allExecutedTools))
+                .requiresConfirmation(true)
+                .confirmationToken(confirmationToken)
+                .pendingToolName(pendingToolName)
                 .metadataJson(serializeMetadata(collectedMetadata))
                 .build();
     }
@@ -273,6 +438,14 @@ public class PlanningEngine {
                 target.add(inc);
             }
         }
+    }
+
+    private boolean containsConfirmation(List<LumenResponseBlock> blocks, String confirmationToken) {
+        if (confirmationToken == null) return false;
+        return blocks.stream().anyMatch(b ->
+                "confirmation".equals(b.getType())
+                        && b.getData() != null
+                        && confirmationToken.equals(String.valueOf(b.getData().get("confirmationToken"))));
     }
 
     private SupervisorDecision parseSupervisorDecision(String raw) {
@@ -331,6 +504,10 @@ public class PlanningEngine {
                                 if (narrative.length() > 0) narrative.append("\n");
                                 narrative.append(block.getContent());
                             }
+                        } else if ("execution_plan".equalsIgnoreCase(block.getType())) {
+                            // Sub-agent execution plans are superseded by the supervisor's canonical plan
+                            // (and the live trace attached by ConversationManager); keeping them duplicates cards.
+                            log.debug("PlanningEngine dropped sub-agent execution_plan block: supervisor owns the plan");
                         } else {
                             nonTextBlocks.add(block);
 

@@ -36,7 +36,7 @@ public class VisionWorkerPool {
     private String workerInstanceId;
 
     @Transactional
-    @Scheduled(fixedDelayString = "${aggarly.vision.worker.poll-interval-ms:5000}")
+    //@Scheduled(fixedDelayString = "${aggarly.vision.worker.poll-interval-ms:5000}")
     public void pollAndDispatch() {
         if (activeTaskCount.get() >= maxConcurrent) {
             return;

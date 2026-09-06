@@ -20,4 +20,6 @@ public interface MessageService {
     List<MessageResponse> getMessagesBefore(UUID conversationId, Instant before, int limit, UUID currentUserId);
 
     void recordReadReceipt(UUID messageId, UUID userId);
+
+    void clearConversationMessages(UUID conversationId, UUID currentUserId);
 }

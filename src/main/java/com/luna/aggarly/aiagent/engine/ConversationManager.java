@@ -17,6 +17,7 @@ import com.luna.aggarly.chat.entity.enums.MessageType;
 import com.luna.aggarly.chat.entity.enums.ParticipantRole;
 import com.luna.aggarly.chat.repository.ConversationParticipantRepository;
 import com.luna.aggarly.chat.repository.ConversationRepository;
+import com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher;
 import com.luna.aggarly.chat.service.ChatAiBridgeService;
 import com.luna.aggarly.chat.service.MessageService;
 import com.luna.aggarly.user.security.UserPrincipal;
@@ -41,6 +42,7 @@ public class ConversationManager {
     private final ConversationRepository chatConversationRepository;
     private final ConversationParticipantRepository participantRepository;
     private final ObjectMapper objectMapper;
+    private final com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher activityPublisher;
     private MessageService messageService;
 
     public ConversationManager(
@@ -51,7 +53,8 @@ public class ConversationManager {
             AgentRouter agentRouter,
             ConversationRepository chatConversationRepository,
             ConversationParticipantRepository participantRepository,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher activityPublisher
     ) {
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
@@ -61,6 +64,7 @@ public class ConversationManager {
         this.chatConversationRepository = chatConversationRepository;
         this.participantRepository = participantRepository;
         this.objectMapper = objectMapper;
+        this.activityPublisher = activityPublisher;
     }
 
     @Autowired
@@ -73,31 +77,157 @@ public class ConversationManager {
         UUID userId = user != null ? user.getUserId() : UUID.randomUUID();
         log.info("Handling chat message for userId={}, conversationId={}", userId, request.conversationId());
 
-        AiConversation conversation = resolveOrCreateConversation(request.conversationId(), userId);
+        long overallStartTime = System.currentTimeMillis();
+        AgentActivityPublisher.startRecording();
 
-        // 1. Assign smart meaningful title if empty or default
-        if (conversation.getTitle() == null || conversation.getTitle().isBlank() || conversation.getTitle().equals("New AI Inquiry") || conversation.getTitle().equals("Aggarly AI Concierge")) {
-            String title = generateTitle(request.content());
-            conversation.setTitle(title);
-            conversationRepository.save(conversation);
+        try {
+            AiConversation conversation = resolveOrCreateConversation(request.conversationId(), userId);
+
+            UUID chatConvId = request.chatConversationId();
+            if (chatConvId == null) {
+                Optional<Conversation> chatConvOpt = chatConversationRepository.findByAiConversationId(conversation.getId());
+                if (chatConvOpt.isPresent()) {
+                    chatConvId = chatConvOpt.get().getId();
+                } else if (request.conversationId() != null) {
+                    Optional<Conversation> direct = chatConversationRepository.findById(request.conversationId());
+                    if (direct.isPresent()) {
+                        chatConvId = direct.get().getId();
+                    }
+                }
+            }
+
+            UUID effectiveBroadcastId = chatConvId != null ? chatConvId : conversation.getId();
+
+            long thinkStart = System.currentTimeMillis();
+            activityPublisher.publishThinkingStart(effectiveBroadcastId, request.content());
+
+            // 1. Assign smart meaningful title if empty or default
+            if (conversation.getTitle() == null || conversation.getTitle().isBlank() || conversation.getTitle().equals("New AI Inquiry") || conversation.getTitle().equals("Aggarly AI Concierge")) {
+                String title = generateTitle(request.content());
+                conversation.setTitle(title);
+                conversationRepository.save(conversation);
+            }
+
+            persistUserMessage(conversation.getId(), request.content());
+
+            ConversationContext context = memoryContextManager.loadContext(conversation.getId(), userId);
+            context = new ConversationContext(effectiveBroadcastId, context.activeSearchContext(), context.userMemories(), context.conversationHistory());
+
+            activityPublisher.publishThinkingEnd(effectiveBroadcastId, System.currentTimeMillis() - thinkStart, "Context & memories loaded (" + (context.conversationHistory() != null ? context.conversationHistory().size() : 0) + " messages in history)");
+
+            long intentStart = System.currentTimeMillis();
+            activityPublisher.publishIntentStart(effectiveBroadcastId, request.content());
+
+            ClassifiedIntent intent = intentClassifier.classify(request.content(), context);
+            String agentName = resolveAgentNameForCategory(intent.category());
+            activityPublisher.publishIntentEnd(effectiveBroadcastId, intent.category().name(), 0.95, agentName, System.currentTimeMillis() - intentStart);
+
+            AgentResponse response = agentRouter.route(intent, context, user);
+
+            // Enrich response with the complete timeline of recorded events (Thinking, Intent, Turns, Tools, Synthesis, Completion)
+            List<com.luna.aggarly.aiagent.dto.activity.AgentActivityEvent> recordedEvents = AgentActivityPublisher.getRecordedEvents();
+            if (!recordedEvents.isEmpty() && response != null && response.getText() != null) {
+                Map<String, Object> traceData = new LinkedHashMap<>();
+                traceData.put("title", "Execution Plan & Live Trace");
+                traceData.put("totalDurationMs", System.currentTimeMillis() - overallStartTime);
+                traceData.put("totalSteps", recordedEvents.size());
+
+                List<Map<String, Object>> sanitizedEvents = new ArrayList<>();
+                List<Map<String, Object>> stepsList = new ArrayList<>();
+
+                for (com.luna.aggarly.aiagent.dto.activity.AgentActivityEvent ev : recordedEvents) {
+                    Map<String, Object> evMap = new LinkedHashMap<>();
+                    evMap.put("id", ev.id());
+                    evMap.put("eventType", ev.eventType());
+                    evMap.put("activityType", ev.activityType() != null ? ev.activityType().name() : null);
+                    evMap.put("agentName", ev.agentName());
+                    evMap.put("turn", ev.turn());
+                    evMap.put("toolName", ev.toolName());
+                    evMap.put("friendlyTitle", ev.friendlyTitle());
+                    evMap.put("status", ev.status());
+                    evMap.put("durationMs", ev.durationMs());
+                    evMap.put("inputSummary", ev.inputSummary());
+                    evMap.put("resultSummary", ev.resultSummary() != null ? ev.resultSummary() : ev.friendlyTitle());
+                    evMap.put("timestamp", ev.timestamp());
+                    sanitizedEvents.add(evMap);
+
+                    Map<String, Object> step = new LinkedHashMap<>();
+                    step.put("id", ev.id());
+                    step.put("activityType", ev.activityType() != null ? ev.activityType().name() : null);
+                    step.put("agentName", ev.agentName());
+                    step.put("toolName", ev.toolName());
+                    step.put("friendlyTitle", ev.friendlyTitle());
+                    step.put("status", ev.status());
+                    step.put("durationMs", ev.durationMs());
+                    step.put("input", ev.inputSummary());
+                    step.put("summary", ev.resultSummary() != null ? ev.resultSummary() : ev.friendlyTitle());
+                    step.put("timestamp", ev.timestamp());
+                    stepsList.add(step);
+                }
+
+                traceData.put("events", sanitizedEvents);
+                traceData.put("steps", stepsList);
+
+                List<com.luna.aggarly.aiagent.engine.model.LumenResponseBlock> extraBlocks = new ArrayList<>();
+                extraBlocks.add(com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.executionPlan(traceData));
+
+                if (response.getMetadataJson() != null && !response.getMetadataJson().isBlank()) {
+                    try {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> metaMap = objectMapper.readValue(response.getMetadataJson(), Map.class);
+                        List<com.luna.aggarly.aiagent.engine.model.LumenResponseBlock> metaBlocks = com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.extractBlocksFromMetadata(metaMap);
+                        extraBlocks.addAll(metaBlocks);
+                    } catch (Exception metaEx) {
+                        log.debug("Failed to extract blocks from agent metadataJson: {}", metaEx.getMessage());
+                    }
+                }
+
+                if (response.isRequiresConfirmation() && response.getConfirmationToken() != null) {
+                    Map<String, Object> confData = new LinkedHashMap<>();
+                    confData.put("title", "Action Confirmation Required");
+                    confData.put("message", response.getText() != null && !response.getText().startsWith("{") ? response.getText() : "This operation requires your explicit confirmation.");
+                    confData.put("toolName", response.getPendingToolName());
+                    confData.put("pendingToolName", response.getPendingToolName());
+                    confData.put("confirmationToken", response.getConfirmationToken());
+                    confData.put("confirmEndpoint", "/api/v1/ai/confirm/" + response.getConfirmationToken());
+                    confData.put("rejectEndpoint", "/api/v1/ai/reject/" + response.getConfirmationToken());
+                    confData.put("actionType", response.getPendingToolName() != null ? response.getPendingToolName().toUpperCase().replace('.', '_') : "CONFIRM_ACTION");
+                    confData.put("confirmLabel", "Confirm & Proceed");
+                    confData.put("cancelLabel", "Cancel");
+                    extraBlocks.add(com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.confirmation(confData));
+
+                    extraBlocks.add(com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.actions(List.of(
+                            Map.of("id", "confirm-" + response.getConfirmationToken(), "label", "Confirm & Proceed", "variant", "primary", "action", "ai.confirm", "confirmationToken", response.getConfirmationToken()),
+                            Map.of("id", "cancel-" + response.getConfirmationToken(), "label", "Cancel", "variant", "secondary", "action", "ai.cancel", "confirmationToken", response.getConfirmationToken())
+                    )));
+                }
+
+                String enrichedJson = com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.formatResponse(
+                        response.getText(),
+                        extraBlocks
+                );
+
+                response = AgentResponse.builder()
+                        .text(enrichedJson)
+                        .toolCalls(response.getToolCalls())
+                        .requiresConfirmation(response.isRequiresConfirmation())
+                        .confirmationToken(response.getConfirmationToken())
+                        .pendingToolName(response.getPendingToolName())
+                        .metadataJson(response.getMetadataJson())
+                        .build();
+            }
+
+            persistAssistantMessage(conversation.getId(), response);
+
+            memoryContextManager.updateContext(conversation.getId(), response);
+
+            // 2. Synchronize and Bridge with Chat Module (conversations and messages tables)
+            bridgeWithChatModule(conversation, request.content(), response, userId, request.conversationId());
+
+            return buildChatMessageResponse(conversation.getId(), response);
+        } finally {
+            AgentActivityPublisher.clearRecording();
         }
-
-        persistUserMessage(conversation.getId(), request.content());
-
-        ConversationContext context = memoryContextManager.loadContext(conversation.getId(), userId);
-
-        ClassifiedIntent intent = intentClassifier.classify(request.content(), context);
-
-        AgentResponse response = agentRouter.route(intent, context, user);
-
-        persistAssistantMessage(conversation.getId(), response);
-
-        memoryContextManager.updateContext(conversation.getId(), response);
-
-        // 2. Synchronize and Bridge with Chat Module (conversations and messages tables)
-        bridgeWithChatModule(conversation, request.content(), response, userId, request.conversationId());
-
-        return buildChatMessageResponse(conversation.getId(), response);
     }
 
     private void bridgeWithChatModule(AiConversation aiConv, String userContent, AgentResponse response, UUID userId, UUID requestConvId) {
@@ -272,5 +402,18 @@ public class ConversationManager {
                 .content(response.getText() != null ? response.getText() : "")
                 .toolCallsJson(response.toolCallsAsJson())
                 .build());
+    }
+
+    private String resolveAgentNameForCategory(com.luna.aggarly.aiagent.engine.enums.IntentCategory category) {
+        if (category == null) return "PropertyAgent";
+        return switch (category) {
+            case PROPERTY_SEARCH, PROPERTY_QUESTION, PROPERTY_COMPARISON, AVAILABILITY_QUESTION, IMAGE_ANALYSIS, MEMORY_MANAGEMENT, PLATFORM_NAVIGATION, EXPLAIN_DECISION, SMALL_TALK -> "PropertyAgent";
+            case BOOKING_ACTION, REVIEW_REQUEST, NOTIFICATION_REQUEST, DOCUMENT_ANALYSIS -> "BookingAgent";
+            case HOST_MANAGEMENT -> "HostAgent";
+            case TRAVEL_PLANNING -> "TravelAgent";
+            case SUPPORT_QUESTION, MESSAGING_ASSIST -> "SupportAgent";
+            case ADMIN_MANAGEMENT, MULTI_STEP_COMPLEX -> "AdminAgent";
+            case SCHEDULE_AUTOMATION -> "SchedulingAgent";
+        };
     }
 }

@@ -137,6 +137,23 @@ public class ImageEmbeddingEventHandler {
                 } catch (Exception ignored) {}
             }
 
+            if (metadata.getProperty() != null) {
+                var p = metadata.getProperty();
+                if (p.getAddress() != null && p.getAddress().getCity() != null) {
+                    payload.put("city", p.getAddress().getCity().trim().toLowerCase());
+                }
+                if (p.getAddress() != null && p.getAddress().getCountry() != null) {
+                    payload.put("country", p.getAddress().getCountry().trim().toLowerCase());
+                }
+                if (p.getBasePricePerNight() != null) {
+                    payload.put("pricePerNight", p.getBasePricePerNight().doubleValue());
+                }
+                payload.put("maxGuests", p.getMaxGuests());
+                if (p.getPropertyType() != null) {
+                    payload.put("propertyType", p.getPropertyType().name());
+                }
+            }
+
             // Upsert into Qdrant multi-vector collection
             qdrantClient.upsertMultiVectorPoint(imagesCollection, event.imageId(), namedVectors, payload);
 

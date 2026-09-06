@@ -1,13 +1,13 @@
 package com.luna.aggarly.chat.service.impl;
 
 import com.luna.aggarly.chat.dto.request.CreateConversationRequest;
+import com.luna.aggarly.chat.dto.response.ConversationParticipantResponse;
 import com.luna.aggarly.chat.dto.response.ConversationResponse;
 import com.luna.aggarly.chat.dto.response.ConversationSummaryResponse;
 import com.luna.aggarly.chat.dto.response.MessageResponse;
 import com.luna.aggarly.chat.entity.Conversation;
 import com.luna.aggarly.chat.entity.ConversationParticipant;
 import com.luna.aggarly.chat.entity.enums.ConversationType;
-import com.luna.aggarly.chat.entity.enums.MessageType;
 import com.luna.aggarly.chat.entity.enums.ParticipantRole;
 import com.luna.aggarly.chat.exceptions.ConversationNotFoundException;
 import com.luna.aggarly.chat.exceptions.UnauthorizedChatAccessException;
@@ -17,12 +17,10 @@ import com.luna.aggarly.chat.repository.ConversationRepository;
 import com.luna.aggarly.chat.repository.MessageRepository;
 import com.luna.aggarly.chat.service.ChatAiBridgeService;
 import com.luna.aggarly.chat.service.ConversationService;
-import com.luna.aggarly.chat.service.MessageService;
-import com.luna.aggarly.user.repository.UserRepository;
 import com.luna.aggarly.user.entity.User;
+import com.luna.aggarly.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -30,10 +28,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -46,18 +42,95 @@ public class ConversationServiceImpl implements ConversationService {
     private final UserRepository userRepository;
     private final ChatMapper chatMapper;
 
+    // --- Participant Enrichment --------------------------------------------------
+
+    /**
+     * Takes a list of already-mapped ConversationParticipantResponse objects (which have
+     * null display info from MapStruct) and enriches them with displayName, username, and
+     * avatarUrl using a single batch UserRepository.findAllById() call (no N+1).
+     *
+     * Name resolution priority: displayName -> firstName + lastName -> username
+     */
+    private List<ConversationParticipantResponse> enrichParticipants(
+            List<ConversationParticipantResponse> participants) {
+
+        if (participants == null || participants.isEmpty()) return participants;
+
+        Set<UUID> userIds = participants.stream()
+                .map(ConversationParticipantResponse::userId)
+                .collect(Collectors.toSet());
+
+        Map<UUID, User> userMap = userRepository.findAllById(userIds).stream()
+                .collect(Collectors.toMap(User::getId, u -> u));
+
+        return participants.stream().map(p -> {
+            User user = userMap.get(p.userId());
+            if (user == null) {
+                // System bot or deleted user: keep as-is with null display fields
+                return p;
+            }
+            return new ConversationParticipantResponse(
+                    p.id(),
+                    p.userId(),
+                    resolveDisplayName(user),
+                    user.getUsername(),
+                    user.getAvatarUrl(),
+                    p.role(),
+                    p.lastReadAt(),
+                    p.unreadCount(),
+                    p.muted(),
+                    p.archived(),
+                    p.joinedAt()
+            );
+        }).toList();
+    }
+
+    /**
+     * Resolves the best human-readable name for a user.
+     * Priority: displayName -> firstName (+ lastName) -> username
+     */
+    private String resolveDisplayName(User user) {
+        if (user.getDisplayName() != null && !user.getDisplayName().isBlank()) {
+            return user.getDisplayName();
+        }
+        if (user.getFirstName() != null && !user.getFirstName().isBlank()) {
+            String last = user.getLastName() != null ? " " + user.getLastName() : "";
+            return user.getFirstName() + last;
+        }
+        return user.getUsername();
+    }
+
+    /** Wraps a ConversationResponse, replacing its participant list with an enriched one. */
+    private ConversationResponse enrichResponse(ConversationResponse resp) {
+        return new ConversationResponse(
+                resp.id(),
+                resp.type(),
+                resp.propertyId(),
+                resp.bookingId(),
+                resp.aiConversationId(),
+                resp.title(),
+                resp.name(),
+                resp.lastMessageAt(),
+                resp.lastMessagePreview(),
+                enrichParticipants(resp.participants()),
+                resp.recentMessages(),
+                resp.createdAt()
+        );
+    }
+
+    // --- Service Methods ---------------------------------------------------------
+
     @Override
     @Transactional
     public ConversationResponse createConversation(CreateConversationRequest request, UUID creatorId) {
         log.info("Creating conversation of type {} by user {}", request.type(), creatorId);
 
-        // If direct or booking inquiry, check if already exists between these 2 users
         if ((request.type() == ConversationType.DIRECT || request.type() == ConversationType.BOOKING_INQUIRY)
                 && request.recipientId() != null) {
             Optional<Conversation> existing = conversationRepository.findDirectConversationBetween(
                     creatorId, request.recipientId(), request.type());
             if (existing.isPresent()) {
-                return chatMapper.toResponse(existing.get());
+                return enrichResponse(chatMapper.toResponse(existing.get()));
             }
         }
 
@@ -83,7 +156,6 @@ public class ConversationServiceImpl implements ConversationService {
 
         Conversation saved = conversationRepository.save(conversation);
 
-        // Add creator as participant
         ConversationParticipant creator = ConversationParticipant.builder()
                 .conversation(saved)
                 .userId(creatorId)
@@ -93,7 +165,6 @@ public class ConversationServiceImpl implements ConversationService {
                 .build();
         participantRepository.save(creator);
 
-        // Add recipient if provided
         if (request.recipientId() != null) {
             ConversationParticipant recipient = ConversationParticipant.builder()
                     .conversation(saved)
@@ -104,7 +175,6 @@ public class ConversationServiceImpl implements ConversationService {
             participantRepository.save(recipient);
         }
 
-        // If AI Concierge, add system AI Bot as participant
         if (request.type() == ConversationType.AI_CONCIERGE) {
             ConversationParticipant aiBot = ConversationParticipant.builder()
                     .conversation(saved)
@@ -115,7 +185,7 @@ public class ConversationServiceImpl implements ConversationService {
             participantRepository.save(aiBot);
         }
 
-        return chatMapper.toResponse(saved);
+        return enrichResponse(chatMapper.toResponse(saved));
     }
 
     @Override
@@ -123,7 +193,7 @@ public class ConversationServiceImpl implements ConversationService {
     public ConversationResponse getOrCreateAiConciergeConversation(UUID userId) {
         Optional<Conversation> existing = conversationRepository.findAiConciergeConversation(userId);
         if (existing.isPresent()) {
-            return chatMapper.toResponse(existing.get());
+            return enrichResponse(chatMapper.toResponse(existing.get()));
         }
 
         CreateConversationRequest request = new CreateConversationRequest(
@@ -143,34 +213,34 @@ public class ConversationServiceImpl implements ConversationService {
         return conversationRepository.findUserActiveConversations(userId, pageable)
                 .map(conv -> {
                     ConversationSummaryResponse summary = chatMapper.toSummaryResponse(conv);
-                    // Populate unread count for current user
+
                     int unread = conv.getParticipants().stream()
                             .filter(p -> p.getUserId().equals(userId))
                             .mapToInt(ConversationParticipant::getUnreadCount)
                             .findFirst()
                             .orElse(0);
 
+                    // For DIRECT conversations override title with the other participant's display name
                     String effectiveTitle = summary.title();
                     if (conv.getType() == ConversationType.DIRECT) {
-                        UUID otherUserId = conv.getParticipants().stream()
+                        Optional<UUID> otherUserId = conv.getParticipants().stream()
                                 .map(ConversationParticipant::getUserId)
                                 .filter(id -> !id.equals(userId))
-                                .findFirst()
-                                .orElse(null);
-                        if (otherUserId != null) {
-                            Optional<User> other = userRepository.findById(otherUserId);
+                                .findFirst();
+                        if (otherUserId.isPresent()) {
+                            Optional<User> other = userRepository.findById(otherUserId.get());
                             if (other.isPresent()) {
-                                User u = other.get();
-                                String name = u.getDisplayName();
-                                if (name == null || name.isBlank()) {
-                                    name = (u.getFirstName() != null ? u.getFirstName() + (u.getLastName() != null ? " " + u.getLastName() : "") : u.getUsername());
-                                }
-                                if (name != null && !name.isBlank()) {
+                                String name = resolveDisplayName(other.get());
+                                if (!name.isBlank()) {
                                     effectiveTitle = name;
                                 }
                             }
                         }
                     }
+
+                    // Batch-enrich participant list with display info
+                    List<ConversationParticipantResponse> enrichedParticipants =
+                            enrichParticipants(chatMapper.toParticipantResponseList(conv.getParticipants()));
 
                     return new ConversationSummaryResponse(
                             summary.id(),
@@ -181,7 +251,7 @@ public class ConversationServiceImpl implements ConversationService {
                             summary.lastMessageAt(),
                             summary.lastMessagePreview(),
                             unread,
-                            summary.participants()
+                            enrichedParticipants
                     );
                 });
     }
@@ -201,7 +271,7 @@ public class ConversationServiceImpl implements ConversationService {
 
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElseGet(() -> {
-                    log.info("Conversation {} not found, creating new AI Concierge thread for user {}", conversationId, currentUserId);
+                    log.info("Conversation {} not found, creating AI Concierge thread for user {}", conversationId, currentUserId);
                     ConversationResponse created = getOrCreateAiConciergeConversation(currentUserId);
                     return conversationRepository.findById(created.id())
                             .orElseThrow(() -> new ConversationNotFoundException(conversationId));
@@ -214,7 +284,7 @@ public class ConversationServiceImpl implements ConversationService {
             throw new UnauthorizedChatAccessException("You are not a participant in this conversation");
         }
 
-        return chatMapper.toResponse(conversation);
+        return enrichResponse(chatMapper.toResponse(conversation));
     }
 
     @Override
@@ -241,7 +311,8 @@ public class ConversationServiceImpl implements ConversationService {
         }
 
         int max = Math.min(Math.max(1, limit), 100);
-        return chatMapper.toMessageResponseList(messageRepository.findRecentMessages(conversation.getId(), PageRequest.of(0, max)));
+        return chatMapper.toMessageResponseList(
+                messageRepository.findRecentMessages(conversation.getId(), PageRequest.of(0, max)));
     }
 
     @Override

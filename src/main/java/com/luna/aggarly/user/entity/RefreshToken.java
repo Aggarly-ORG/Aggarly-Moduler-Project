@@ -6,6 +6,7 @@ import lombok.*;
 import org.hibernate.annotations.SQLRestriction;
 
 import java.time.Instant;
+import java.util.UUID;
 
 /**
  * Entity representing an active user session refresh token (table: refresh_tokens).
@@ -23,6 +24,9 @@ public class RefreshToken extends BaseEntity {
     @Column(nullable = false, unique = true)
     private String token;
 
+    @Column(name = "family_id", nullable = false)
+    private UUID familyId;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
@@ -33,6 +37,12 @@ public class RefreshToken extends BaseEntity {
     @Column(nullable = false)
     @Builder.Default
     private boolean revoked = false;
+
+    @Column(name = "revoked_at")
+    private Instant revokedAt;
+
+    @Column(name = "replaced_by_token", length = 255)
+    private String replacedByToken;
 
     @Column(name = "associated_access_token_hash", length = 256)
     private String associatedAccessTokenHash;

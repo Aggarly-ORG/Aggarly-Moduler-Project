@@ -2,7 +2,7 @@ package com.luna.aggarly.aiagent.schema;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.luna.aggarly.aiagent.tool.schedule.record.CreateScheduleParams;
+import com.luna.aggarly.aiagent.tool.schedule.ScheduleCreateTool;
 import com.luna.aggarly.scheduler.dto.plan.TriggerConfig;
 import org.junit.jupiter.api.Test;
 
@@ -14,9 +14,9 @@ public class JsonSchemaServiceTest {
 
     @Test
     public void testGenerateCreateScheduleParamsSchema() throws Exception {
-        JsonNode schema = schemaService.generate(CreateScheduleParams.class);
+        JsonNode schema = schemaService.generate(ScheduleCreateTool.Params.class);
         assertNotNull(schema);
-        System.out.println("Generated CreateScheduleParams Schema:\n" +
+        System.out.println("Generated ScheduleCreateTool.Params Schema:\n" +
                 new ObjectMapper().writerWithDefaultPrettyPrinter().writeValueAsString(schema));
 
         assertTrue(schema.has("$schema"));
@@ -27,7 +27,7 @@ public class JsonSchemaServiceTest {
         assertNotNull(defs);
 
         // Check root record definition
-        String rootDefName = CreateScheduleParams.class.getName().replace('.', '_').replace('$', '_');
+        String rootDefName = ScheduleCreateTool.Params.class.getName().replace('.', '_').replace('$', '_');
         assertTrue(defs.has(rootDefName), "Should contain root definition in $defs: " + rootDefName);
 
         JsonNode rootDef = defs.get(rootDefName);

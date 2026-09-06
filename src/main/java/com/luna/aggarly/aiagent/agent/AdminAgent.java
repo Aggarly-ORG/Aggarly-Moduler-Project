@@ -14,25 +14,23 @@ import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
+@Slf4j
 @Component
 public class AdminAgent implements Agent {
 
-    private static final Logger log = LoggerFactory.getLogger(AdminAgent.class);
     private static final int MAX_AGENT_TURNS = 6;
 
     private static final String ADMIN_AGENT_SYSTEM_PROMPT = """
-        You are Aggarly's Administrative Operations & Moderation AI Assistant.
+        You are Aggarly's Administrative Operations AI Assistant.
 
         You are an autonomous assistant specialized ONLY in administrative tasks,
-        promotional coupon management, content moderation, image OCR text extraction,
-        and platform-level management operations on the Aggarly platform.
+        promotional coupon management, and property visual intelligence inspection
+        on the Aggarly platform.
 
         ================================================================
         CORE PRINCIPLE
@@ -43,8 +41,8 @@ public class AdminAgent implements Agent {
         The backend tools are the authoritative source for:
         - coupon creation and discount rules
         - coupon validity and discount amounts
-        - image content safety and moderation flags
-        - optical character recognition (OCR) text extraction
+        - property image AI metadata and visual features
+        - reference image visual analysis
 
         NEVER invent, estimate, assume, or fabricate any of these values.
 
@@ -297,6 +295,17 @@ public class AdminAgent implements Agent {
            - Route URL: http://localhost:3000/
            - Purpose: Aggarly homepage and concierge interface.
 
+        ================================================================
+        RUNTIME EXPRESSION INJECTION & DYNAMIC FUNCTIONS
+        ================================================================
+        When invoking tools, you have access to Aggarly's Runtime Expression Engine.
+        All tool arguments are dynamically pre-evaluated through the expression engine before execution!
+        You can use:
+        - Root Object & Context: {{obj.<field>}}, {{user.id}}, {{current_conversation()}}, {{origin_channel()}}
+        - Date Functions: {{today()}}, {{now()}}, {{date_add(today(), 3, 'DAYS')}}, {{date_sub(today(), 1, 'MONTHS')}}, {{format_date(today(), 'yyyy-MM-dd')}}
+        - Entity Lookups: {{property('<id>').title}}, {{booking('<id>').status}}, {{user('<id>').email}}
+        - String & Math Utilities: {{upper(str)}}, {{format_currency(amount, 'USD')}}, {{join(list, ', ')}}, {{first(list)}}, {{coalesce(a, b)}}, {{ternary(cond, trueVal, falseVal)}}
+
         4. Authentication Gateway:
            - Route URL: http://localhost:3000/oauth2/callback
            - Purpose: Login and OAuth2 callback authentication.
@@ -306,17 +315,16 @@ public class AdminAgent implements Agent {
     private final ConfirmationGate confirmationGate;
     private final ObjectMapper objectMapper;
     private final Validator validator;
+    private final com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher activityPublisher;
+    private final com.luna.aggarly.common.expression.ExpressionEngine expressionEngine;
 
     private final Map<String, Tool<?, ?>> toolRegistry = new HashMap<>();
 
     private static final Set<String> SUPPORTED_TOOLS = Set.of(
             "coupon.create",
             "coupon.validate",
-            "image.moderation",
-            "image.ocr",
-            "image.caption",
-            "image.getMetadata",
-            "image.storeMetadata"
+            "vision.getImageMetadata",
+            "vision.analyzeReferenceImage"
     );
 
     @Autowired
@@ -325,17 +333,24 @@ public class AdminAgent implements Agent {
             ConfirmationGate confirmationGate,
             ObjectMapper objectMapper,
             Validator validator,
-            List<Tool<?, ?>> tools
+            @Autowired(required = false) com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher activityPublisher,
+            @Autowired(required = false) com.luna.aggarly.common.expression.ExpressionEngine expressionEngine,
+            @Qualifier("toolRegistry") Map<String, Tool<?, ?>> sharedToolRegistry
     ) {
         this.llmClient = llmClient;
         this.confirmationGate = confirmationGate;
         this.objectMapper = objectMapper;
         this.validator = validator;
+        this.activityPublisher = activityPublisher;
+        this.expressionEngine = expressionEngine;
 
-        if (tools != null) {
-            for (Tool<?, ?> tool : tools) {
-                if (SUPPORTED_TOOLS.contains(tool.name())) {
-                    toolRegistry.put(tool.name(), tool);
+        if (sharedToolRegistry != null) {
+            for (String toolName : SUPPORTED_TOOLS) {
+                Tool<?, ?> tool = sharedToolRegistry.get(toolName);
+                if (tool != null) {
+                    toolRegistry.put(toolName, tool);
+                } else {
+                    log.warn("AdminAgent: declared tool '{}' has no registered implementation", toolName);
                 }
             }
         }
@@ -350,7 +365,7 @@ public class AdminAgent implements Agent {
 
     @Override
     public String description() {
-        return "Executes platform administration: discount coupon creation/validation, content moderation, image OCR text extraction, and property image AI metadata.";
+        return "Executes platform administration: promotional coupon management and property visual AI metadata inspection.";
     }
 
     @Override
@@ -380,9 +395,16 @@ public class AdminAgent implements Agent {
         List<ToolDefinition> toolDefinitions = buildToolDefinitions();
         List<ChatMessage> messages = buildConversation(intent, context);
         List<String> executedTools = new ArrayList<>();
+        List<Map<String, Object>> executionSteps = new ArrayList<>();
+        long agentStartTime = System.currentTimeMillis();
+        UUID convId = context != null ? context.conversationId() : null;
 
         for (int turn = 1; turn <= MAX_AGENT_TURNS; turn++) {
             log.debug("AdminAgent turn {}/{}", turn, MAX_AGENT_TURNS);
+            long turnStartTime = System.currentTimeMillis();
+            if (activityPublisher != null && convId != null) {
+                activityPublisher.publishTurnStart(convId, "AdminAgent", turn, MAX_AGENT_TURNS, messages.size(), toolDefinitions.size());
+            }
 
             LlmToolCallResponse llmResponse;
             try {
@@ -392,16 +414,46 @@ public class AdminAgent implements Agent {
                 return failureResponse("I couldn't process your administrative request right now. Please try again.", executedTools);
             }
 
+            long turnDuration = System.currentTimeMillis() - turnStartTime;
+            if (activityPublisher != null && convId != null) {
+                List<String> proposedTools = llmResponse.hasToolCalls()
+                        ? llmResponse.toolCalls().stream().map(LlmToolCall::name).toList()
+                        : List.of();
+                activityPublisher.publishTurnEnd(convId, "AdminAgent", turn, MAX_AGENT_TURNS, turnDuration, proposedTools);
+            }
+
             if (!llmResponse.hasToolCalls()) {
+                long synthStart = System.currentTimeMillis();
+                if (activityPublisher != null && convId != null) {
+                    activityPublisher.publishSynthesisStart(convId, "AdminAgent");
+                }
                 String text = llmResponse.textResponse();
                 if (text == null || text.isBlank()) {
                     log.warn("AdminAgent received empty final response on turn {}", turn);
                     return failureResponse("I wasn't able to complete the administrative task. Please try again.", executedTools);
                 }
+
+                List<com.luna.aggarly.aiagent.engine.model.LumenResponseBlock> backendBlocks = new ArrayList<>();
+                if (!executionSteps.isEmpty()) {
+                    Map<String, Object> planData = new LinkedHashMap<>();
+                    planData.put("title", "Administrative Operations Plan");
+                    planData.put("totalSteps", executionSteps.size());
+                    planData.put("totalDurationMs", System.currentTimeMillis() - agentStartTime);
+                    planData.put("steps", executionSteps);
+                    backendBlocks.add(0, com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.executionPlan(planData));
+                }
+
                 String formattedJson = com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.formatResponse(
                         text,
-                        null
+                        backendBlocks
                 );
+
+                if (activityPublisher != null && convId != null) {
+                    long synthDuration = System.currentTimeMillis() - synthStart;
+                    activityPublisher.publishSynthesisEnd(convId, "AdminAgent", synthDuration, "Generated administrative actions & verification summary");
+                    activityPublisher.publishCompleted(convId, "AdminAgent", System.currentTimeMillis() - agentStartTime, executedTools.size(), turn);
+                }
+
                 return AgentResponse.builder()
                         .text(formattedJson)
                         .toolCalls(List.copyOf(executedTools))
@@ -419,10 +471,18 @@ public class AdminAgent implements Agent {
                     continue;
                 }
 
+                if (activityPublisher != null && convId != null) {
+                    activityPublisher.publishToolStart(convId, "AdminAgent", toolName, toolCall.arguments(), turn);
+                }
+                long toolStart = System.currentTimeMillis();
+
                 if (tool.requiresAuthentication() && user == null) {
                     log.warn("AdminAgent: unauthenticated access attempted on tool '{}'", toolName);
                     messages.add(ChatMessage.toolResponse(toolName, buildErrorJson("AUTHENTICATION_REQUIRED",
                             "Administrative authentication is required.")));
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "AdminAgent", toolName, System.currentTimeMillis() - toolStart, toolCall.arguments(), "Authentication required", false, turn);
+                    }
                     continue;
                 }
 
@@ -431,17 +491,37 @@ public class AdminAgent implements Agent {
                             toolName, toolCall.arguments(), "admin", List.copyOf(messages));
                     String token = confirmationGate.registerPendingConfirmation(user.getUserId(), toolName, state);
                     log.info("AdminAgent: confirmation required — tool={}, token={}, user={}", toolName, token, user.getUserId());
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "AdminAgent", toolName, System.currentTimeMillis() - toolStart, toolCall.arguments(), "Awaiting admin confirmation", true, turn);
+                    }
                     return AgentResponse.awaitingConfirmation(
                             buildConfirmationMessage(toolName), token, toolName, List.copyOf(executedTools));
                 }
 
                 Object typedParameters;
                 try {
-                    typedParameters = objectMapper.convertValue(toolCall.arguments(), tool.parameterType());
+                    Object rawArgs = toolCall.arguments();
+                    if (expressionEngine != null && rawArgs != null) {
+                        com.luna.aggarly.scheduler.workflow.ExecutionContext exprCtx =
+                                com.luna.aggarly.scheduler.workflow.ExecutionContext.forTask(
+                                        user != null ? user.getUserId() : null,
+                                        null,
+                                        null,
+                                        "UTC"
+                                );
+                        if (convId != null) {
+                            exprCtx.variables().put("conversationId", convId.toString());
+                        }
+                        rawArgs = expressionEngine.resolve(rawArgs, exprCtx);
+                    }
+                    typedParameters = objectMapper.convertValue(rawArgs, tool.parameterType());
                 } catch (IllegalArgumentException ex) {
                     log.warn("AdminAgent: invalid arguments for tool '{}': {}", toolName, ex.getMessage());
                     messages.add(ChatMessage.toolResponse(toolName, buildErrorJson("INVALID_ARGUMENTS",
                             "The arguments provided for '" + toolName + "' are malformed.")));
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "AdminAgent", toolName, System.currentTimeMillis() - toolStart, toolCall.arguments(), "Invalid arguments", false, turn);
+                    }
                     continue;
                 }
 
@@ -454,6 +534,9 @@ public class AdminAgent implements Agent {
                             .orElse("Invalid arguments.");
                     log.warn("AdminAgent: validation failed for '{}': {}", toolName, detail);
                     messages.add(ChatMessage.toolResponse(toolName, buildErrorJson("VALIDATION_FAILED", detail)));
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "AdminAgent", toolName, System.currentTimeMillis() - toolStart, toolCall.arguments(), detail, false, turn);
+                    }
                     continue;
                 }
 
@@ -464,11 +547,30 @@ public class AdminAgent implements Agent {
                     ToolResult<Object> result = executableTool.execute(typedParameters, user);
 
                     executedTools.add(toolName);
+                    long duration = System.currentTimeMillis() - toolStart;
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "AdminAgent", toolName, duration, toolCall.arguments(), result.getData(), result.isSuccess(), turn);
+                    }
+
+                    Map<String, Object> step = new LinkedHashMap<>();
+                    step.put("stepNumber", executionSteps.size() + 1);
+                    step.put("agentName", "AdminAgent");
+                    step.put("toolName", toolName);
+                    step.put("status", result.isSuccess() ? "COMPLETED" : "FAILED");
+                    step.put("durationMs", duration);
+                    step.put("input", toolCall.arguments());
+                    step.put("summary", result.isSuccess() ? "Executed " + toolName + " successfully" : "Execution failed");
+                    executionSteps.add(step);
+
                     messages.add(ChatMessage.assistant(buildToolCallJson(toolCall)));
                     messages.add(ChatMessage.toolResponse(toolName, serializeResult(result)));
 
                 } catch (Exception ex) {
                     log.error("AdminAgent: tool '{}' threw an exception on turn {}", toolName, turn, ex);
+                    long duration = System.currentTimeMillis() - toolStart;
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "AdminAgent", toolName, duration, toolCall.arguments(), ex.getMessage(), false, turn);
+                    }
                     messages.add(ChatMessage.toolResponse(toolName, buildErrorJson("TOOL_EXECUTION_FAILED",
                             "The administrative operation failed. Please check logs and try again.")));
                 }
@@ -479,8 +581,8 @@ public class AdminAgent implements Agent {
         return failureResponse("I was unable to complete the administrative operation within the allotted turns.", executedTools);
     }
 
-    public AgentResponse resumeFromConfirmation(PendingConfirmationState state, UserPrincipal ignoredUser) {
-        UserPrincipal user = SecurityUtils.getCurrentUserPrincipal();
+    public AgentResponse resumeFromConfirmation(PendingConfirmationState state, UserPrincipal callerUser) {
+        UserPrincipal user = callerUser != null ? callerUser : SecurityUtils.getCurrentUserPrincipal();
 
         if (user == null || !SecurityUtils.hasRole("ADMIN")) {
             return failureResponse("Access Denied: Admin authentication required to resume.", List.of());

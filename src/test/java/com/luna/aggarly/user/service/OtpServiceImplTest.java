@@ -61,7 +61,7 @@ class OtpServiceImplTest {
     }
 
     @Test
-    @DisplayName("Should return false when validating incorrect or missing OTP")
+    @DisplayName("Should return false when validating incorrect or missing OTP without consuming OTP")
     void shouldReturnFalseForIncorrectOtp() {
         String email = "test@example.com";
         String key = "otp:email_verify:" + email;
@@ -71,9 +71,31 @@ class OtpServiceImplTest {
         boolean isValid = otpService.validateEmailVerificationOtp(email, "123456");
 
         assertThat(isValid).isFalse();
+        verify(redisTemplate, never()).delete(key);
 
         boolean isValidBlank = otpService.validateEmailVerificationOtp(email, "");
         assertThat(isValidBlank).isFalse();
+        verify(redisTemplate, never()).delete(key);
+    }
+
+    @Test
+    @DisplayName("Should allow user to correct typo: fail first time without deleting, succeed second time with correct code")
+    void shouldAllowCorrectionAfterIncorrectOtp() {
+        String email = "retry@example.com";
+        String key = "otp:password_reset:" + email;
+        String correctOtp = "889900";
+
+        when(valueOperations.get(key)).thenReturn(correctOtp);
+
+        // 1st attempt: typo
+        boolean firstAttempt = otpService.validatePasswordResetOtp(email, "112233");
+        assertThat(firstAttempt).isFalse();
+        verify(redisTemplate, never()).delete(key);
+
+        // 2nd attempt: corrected to right code
+        boolean secondAttempt = otpService.validatePasswordResetOtp(email, "889900");
+        assertThat(secondAttempt).isTrue();
+        verify(redisTemplate, times(1)).delete(key);
     }
 
     @Test

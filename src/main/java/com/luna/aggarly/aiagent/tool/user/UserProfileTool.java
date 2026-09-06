@@ -1,10 +1,10 @@
 package com.luna.aggarly.aiagent.tool.user;
 
+import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.luna.aggarly.aiagent.schema.JsonSchemaService;
 import com.luna.aggarly.aiagent.tool.Tool;
 import com.luna.aggarly.aiagent.tool.ToolResult;
-import com.luna.aggarly.aiagent.tool.user.record.UserProfileParams;
 import com.luna.aggarly.user.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -14,7 +14,12 @@ import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
-public class UserProfileTool implements Tool<UserProfileParams, Map<String, Object>> {
+public class UserProfileTool implements Tool<UserProfileTool.Params, Map<String, Object>> {
+
+    public record Params(
+            @JsonPropertyDescription("UUID of the user whose profile is to be retrieved. Optional, defaults to current authenticated user.")
+            UUID userId
+    ) {}
 
     private final JsonSchemaService jsonSchemaService;
 
@@ -29,8 +34,8 @@ public class UserProfileTool implements Tool<UserProfileParams, Map<String, Obje
     }
 
     @Override
-    public Class<UserProfileParams> parameterType() {
-        return UserProfileParams.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -39,7 +44,7 @@ public class UserProfileTool implements Tool<UserProfileParams, Map<String, Obje
     }
 
     @Override
-    public ToolResult<Map<String, Object>> execute(UserProfileParams params, UserPrincipal user) {
+    public ToolResult<Map<String, Object>> execute(Params params, UserPrincipal user) {
         UUID targetId = (params != null && params.userId() != null) ? params.userId() : (user != null ? user.getUserId() : null);
         return ToolResult.ok(Map.of(
                 "userId", targetId != null ? targetId.toString() : "anonymous",
@@ -50,6 +55,6 @@ public class UserProfileTool implements Tool<UserProfileParams, Map<String, Obje
 
     @Override
     public JsonNode parameterSchema() {
-        return jsonSchemaService.generate(UserProfileParams.class);
+        return jsonSchemaService.generate(Params.class);
     }
 }

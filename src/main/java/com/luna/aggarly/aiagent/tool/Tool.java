@@ -21,11 +21,13 @@ public interface Tool<TParams, TResult> {
 
     ToolResult<TResult> execute(TParams params, UserPrincipal currentUser);
 
+    JsonSchemaService SCHEMA_SERVICE = new com.luna.aggarly.aiagent.schema.JsonSchemaService();
+
     default JsonNode parameterSchema() {
-        return new JsonSchemaService().generate(parameterType());
+        return SCHEMA_SERVICE.generate(parameterType());
     }
 
     default JsonNode responseSchema() {
-        return new JsonSchemaService().generate(Void.class);
+        return SCHEMA_SERVICE.generate(Void.class);
     }
 }

@@ -160,6 +160,23 @@ public class VisionImagePipelineOrchestrator {
                     payload.put("qualityScore", metadata.getQualityScore() != null ? metadata.getQualityScore() : 0.80);
                     payload.put("moderationStatus", metadata.getModerationStatus().name());
 
+                    Property prop = propertyImage.getProperty();
+                    if (prop != null) {
+                        if (prop.getAddress() != null && prop.getAddress().getCity() != null) {
+                            payload.put("city", prop.getAddress().getCity().trim().toLowerCase());
+                        }
+                        if (prop.getAddress() != null && prop.getAddress().getCountry() != null) {
+                            payload.put("country", prop.getAddress().getCountry().trim().toLowerCase());
+                        }
+                        if (prop.getBasePricePerNight() != null) {
+                            payload.put("pricePerNight", prop.getBasePricePerNight().doubleValue());
+                        }
+                        payload.put("maxGuests", prop.getMaxGuests());
+                        if (prop.getPropertyType() != null) {
+                            payload.put("propertyType", prop.getPropertyType().name());
+                        }
+                    }
+
                     qdrantClient.upsertMultiVectorPoint("property_images_v1", imageId, namedVectors, payload);
 
                     metadata.setQdrantPointId(imageId);

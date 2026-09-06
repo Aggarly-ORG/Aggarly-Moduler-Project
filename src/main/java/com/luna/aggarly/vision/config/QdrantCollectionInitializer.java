@@ -60,7 +60,7 @@ public class QdrantCollectionInitializer implements ApplicationRunner {
             modelSeeder.seedDefaultModels();
 
             // 5. Auto-sync existing database embeddings to Qdrant
-            embeddingMigrationService.migrateAllProperties(100);
+            //embeddingMigrationService.migrateAllProperties(100);
 
             log.info("QdrantCollectionInitializer completed successfully");
         } catch (Exception e) {

@@ -10,9 +10,9 @@ import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
-public class DocumentAnalysisTool implements Tool<DocumentAnalysisTool.DocumentAnalysisRequest, Map<String, Object>> {
+public class DocumentAnalysisTool implements Tool<DocumentAnalysisTool.Params, Map<String, Object>> {
 
-    public record DocumentAnalysisRequest(
+    public record Params(
             String documentFileId,
             String analysisType // SUMMARIZE, EXTRACT_DATES, EXTRACT_PAYMENTS, EXPLAIN_CLAUSES
     ) {}
@@ -28,8 +28,8 @@ public class DocumentAnalysisTool implements Tool<DocumentAnalysisTool.DocumentA
     }
 
     @Override
-    public Class<DocumentAnalysisRequest> parameterType() {
-        return DocumentAnalysisRequest.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -38,9 +38,9 @@ public class DocumentAnalysisTool implements Tool<DocumentAnalysisTool.DocumentA
     }
 
     @Override
-    public ToolResult<Map<String, Object>> execute(DocumentAnalysisRequest params, UserPrincipal user) {
+    public ToolResult<Map<String, Object>> execute(Params params, UserPrincipal user) {
         return ToolResult.ok(Map.of(
-                "analysisType", params.analysisType(),
+                "analysisType", params.analysisType() != null ? params.analysisType() : "SUMMARIZE",
                 "summary", "Standard Lease Agreement: 12-month term starting Sept 1, monthly rent $1,500 due on the 1st.",
                 "keyClauses", java.util.List.of("No smoking permitted", "Pets allowed with deposit", "30-day cancellation notice required")
         ));

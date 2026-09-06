@@ -42,7 +42,6 @@ public class IntentClassifier {
                  - Inquiring about specific property details, house rules, cancellation terms, host bio, or location maps.
                  - Checking live property availability for dates.
                  - Comparing two or more properties side-by-side.
-                 - Visual similarity search (e.g. "find apartments that look like this photo") or vector search by interior style.
                  - Accessing user favorites, saved wishlists, or stored property preferences.
                  - Viewing past guest rating summaries, sub-ratings (cleanliness, accuracy), or review sentiment.
                  Examples:

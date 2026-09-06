@@ -1,13 +1,14 @@
 package com.luna.aggarly.aiagent.tool.payment;
 
+import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.luna.aggarly.aiagent.schema.JsonSchemaService;
 import com.luna.aggarly.aiagent.tool.Tool;
 import com.luna.aggarly.aiagent.tool.ToolResult;
-import com.luna.aggarly.aiagent.tool.payment.record.PaymentStatusParams;
 import com.luna.aggarly.payment.dto.PaymentDetailResponse;
 import com.luna.aggarly.payment.service.PaymentService;
 import com.luna.aggarly.user.security.UserPrincipal;
+import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -15,7 +16,13 @@ import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
-public class PaymentStatusTool implements Tool<PaymentStatusParams, PaymentDetailResponse> {
+public class PaymentStatusTool implements Tool<PaymentStatusTool.Params, PaymentDetailResponse> {
+
+    public record Params(
+            @NotNull
+            @JsonPropertyDescription("The unique identifier (UUID) of the booking whose payment status is being queried.")
+            UUID bookingId
+    ) {}
 
     private final PaymentService paymentService;
     private final JsonSchemaService jsonSchemaService;
@@ -31,8 +38,8 @@ public class PaymentStatusTool implements Tool<PaymentStatusParams, PaymentDetai
     }
 
     @Override
-    public Class<PaymentStatusParams> parameterType() {
-        return PaymentStatusParams.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -46,7 +53,7 @@ public class PaymentStatusTool implements Tool<PaymentStatusParams, PaymentDetai
     }
 
     @Override
-    public ToolResult<PaymentDetailResponse> execute(PaymentStatusParams params, UserPrincipal user) {
+    public ToolResult<PaymentDetailResponse> execute(Params params, UserPrincipal user) {
         if (params == null || params.bookingId() == null) {
             return ToolResult.failed("INVALID_PARAMS", "bookingId is required to fetch payment status.");
         }
@@ -56,7 +63,7 @@ public class PaymentStatusTool implements Tool<PaymentStatusParams, PaymentDetai
 
     @Override
     public JsonNode parameterSchema() {
-        return jsonSchemaService.generate(PaymentStatusParams.class);
+        return jsonSchemaService.generate(Params.class);
     }
 
     @Override

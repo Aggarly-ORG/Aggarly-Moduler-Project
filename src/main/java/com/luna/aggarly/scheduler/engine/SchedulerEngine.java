@@ -35,7 +35,7 @@ public class SchedulerEngine {
         log.info("Initialized SchedulerEngine with workerPool size={}", workerThreads);
     }
 
-    //@Scheduled(fixedDelayString = "${app.scheduler.poll-interval-ms:5000}", initialDelay = 5000)
+    //@org.springframework.scheduling.annotation.Scheduled(fixedDelayString = "${app.scheduler.poll-interval-ms:5000}", initialDelay = 5000)
     public void pollAndDispatch() {
         try {
             List<ScheduledTask> claimedTasks = dueTaskClaimer.claimDueTasks(batchSize);

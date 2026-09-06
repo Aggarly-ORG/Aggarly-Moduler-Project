@@ -8,9 +8,9 @@ import org.springframework.stereotype.Component;
 
 @Component
 @RequiredArgsConstructor
-public class TranslationTool implements Tool<TranslationTool.TranslationRequest, String> {
+public class TranslationTool implements Tool<TranslationTool.Params, String> {
 
-    public record TranslationRequest(
+    public record Params(
             String text,
             String targetLanguage
     ) {}
@@ -26,8 +26,8 @@ public class TranslationTool implements Tool<TranslationTool.TranslationRequest,
     }
 
     @Override
-    public Class<TranslationRequest> parameterType() {
-        return TranslationRequest.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -36,7 +36,9 @@ public class TranslationTool implements Tool<TranslationTool.TranslationRequest,
     }
 
     @Override
-    public ToolResult<String> execute(TranslationRequest params, UserPrincipal user) {
-        return ToolResult.ok("[Translated to " + params.targetLanguage() + "]: " + params.text());
+    public ToolResult<String> execute(Params params, UserPrincipal user) {
+        String targetLang = (params != null && params.targetLanguage() != null) ? params.targetLanguage() : "English";
+        String text = (params != null && params.text() != null) ? params.text() : "";
+        return ToolResult.ok("[Translated to " + targetLang + "]: " + text);
     }
 }

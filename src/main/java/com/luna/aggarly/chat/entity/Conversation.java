@@ -58,6 +58,14 @@ public class Conversation extends BaseEntity {
         }
     }
 
+    public UUID getAiConversationId() {
+        return aiConversationId;
+    }
+
+    public void setAiConversationId(UUID aiConversationId) {
+        this.aiConversationId = aiConversationId;
+    }
+
     public void setName(String name) {
         this.name = name;
         if (this.title == null || this.title.isBlank()) {

@@ -196,6 +196,16 @@
 
 <script>
     function parseQuery() {
+        // Support URL fragment (#token=...&refreshToken=...) to prevent token leakage in referer headers/logs
+        if (window.location.hash && window.location.hash.length > 1) {
+            const hashParams = new URLSearchParams(window.location.hash.substring(1));
+            if (hashParams.has('token') || hashParams.has('refreshToken')) {
+                return {
+                    token: hashParams.get('token') || '',
+                    refreshToken: hashParams.get('refreshToken') || ''
+                };
+            }
+        }
         const params = new URLSearchParams(window.location.search);
         return {
             token: params.get('token') || '',
@@ -230,6 +240,32 @@
                 document.getElementById('userEmail').innerText = payload.sub || 'N/A';
                 document.getElementById('userId').innerText = payload.userId || 'N/A';
                 document.getElementById('userRoles').innerText = Array.isArray(payload.roles) ? payload.roles.join(', ') : (payload.roles || 'GUEST');
+            }
+
+            // AUTO-HANDSHAKE: If opened as a floating popup window, notify opener and close
+            if (window.opener && !window.opener.closed) {
+                try {
+                    window.opener.postMessage({
+                        type: 'AGGARLY_OAUTH_SUCCESS',
+                        token: token,
+                        refreshToken: refreshToken,
+                        user: payload ? {
+                            email: payload.sub,
+                            username: payload.username || (payload.sub ? payload.sub.split('@')[0] : 'user'),
+                            id: payload.userId
+                        } : null
+                    }, '*');
+                    setTimeout(function() {
+                        window.close();
+                    }, 200);
+                } catch(err) {
+                    console.error('Error communicating with main window:', err);
+                }
+            } else {
+                // Not in popup: direct redirect to frontend callback
+                setTimeout(function() {
+                    window.location.href = 'http://localhost:3000/oauth2/callback#token=' + encodeURIComponent(token) + '&refreshToken=' + encodeURIComponent(refreshToken);
+                }, 500);
             }
         } else {
             document.getElementById('tokenArea').value = 'No token provided in URL parameters.';

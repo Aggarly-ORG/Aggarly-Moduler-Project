@@ -15,11 +15,11 @@ import java.util.UUID;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class ReplyGenerationTool implements Tool<ReplyGenerationTool.ReplyGenerationRequest, String> {
+public class ReplyGenerationTool implements Tool<ReplyGenerationTool.Params, String> {
 
     private final ConversationService conversationService;
 
-    public record ReplyGenerationRequest(
+    public record Params(
             UUID conversationId,
             String tone
     ) {}
@@ -35,8 +35,8 @@ public class ReplyGenerationTool implements Tool<ReplyGenerationTool.ReplyGenera
     }
 
     @Override
-    public Class<ReplyGenerationRequest> parameterType() {
-        return ReplyGenerationRequest.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -50,17 +50,19 @@ public class ReplyGenerationTool implements Tool<ReplyGenerationTool.ReplyGenera
     }
 
     @Override
-    public ToolResult<String> execute(ReplyGenerationRequest params, UserPrincipal user) {
+    public ToolResult<String> execute(Params params, UserPrincipal user) {
         try {
             if (user == null || user.getUserId() == null) {
                 return ToolResult.failed("AUTH_REQUIRED", "User must be authenticated to generate a reply.");
             }
             UUID userId = user.getUserId();
-            List<MessageResponse> messages = conversationService.getRecentMessages(params.conversationId(), 5, userId);
+            List<MessageResponse> messages = (params != null && params.conversationId() != null)
+                    ? conversationService.getRecentMessages(params.conversationId(), 5, userId)
+                    : List.of();
 
             String lastMessage = messages.isEmpty() ? "Hello" : messages.get(0).content();
 
-            String tone = params.tone() != null ? params.tone() : "friendly and professional";
+            String tone = (params != null && params.tone() != null) ? params.tone() : "friendly and professional";
             return ToolResult.ok(String.format("Suggested reply (%s) to '%s':\n\"Hi! Thank you for your message. Everything is confirmed and ready for your stay.\"",
                     tone, lastMessage.length() > 30 ? lastMessage.substring(0, 27) + "..." : lastMessage));
         } catch (Exception e) {

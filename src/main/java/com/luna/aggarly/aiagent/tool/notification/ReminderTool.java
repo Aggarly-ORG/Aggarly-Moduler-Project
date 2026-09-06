@@ -10,9 +10,9 @@ import java.time.Instant;
 
 @Component
 @RequiredArgsConstructor
-public class ReminderTool implements Tool<ReminderTool.ReminderRequest, String> {
+public class ReminderTool implements Tool<ReminderTool.Params, String> {
 
-    public record ReminderRequest(
+    public record Params(
             String message,
             Instant triggerAt
     ) {}
@@ -28,8 +28,8 @@ public class ReminderTool implements Tool<ReminderTool.ReminderRequest, String> 
     }
 
     @Override
-    public Class<ReminderRequest> parameterType() {
-        return ReminderRequest.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -38,7 +38,9 @@ public class ReminderTool implements Tool<ReminderTool.ReminderRequest, String> 
     }
 
     @Override
-    public ToolResult<String> execute(ReminderRequest params, UserPrincipal user) {
-        return ToolResult.ok("Reminder scheduled for " + params.triggerAt() + ": " + params.message());
+    public ToolResult<String> execute(Params params, UserPrincipal user) {
+        String msg = (params != null && params.message() != null) ? params.message() : "";
+        Instant trig = (params != null && params.triggerAt() != null) ? params.triggerAt() : Instant.now();
+        return ToolResult.ok("Reminder scheduled for " + trig + ": " + msg);
     }
 }

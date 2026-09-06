@@ -1,20 +1,43 @@
 package com.luna.aggarly.aiagent.tool.booking;
 
+import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.luna.aggarly.aiagent.schema.JsonSchemaService;
 import com.luna.aggarly.aiagent.tool.Tool;
 import com.luna.aggarly.aiagent.tool.ToolResult;
-import com.luna.aggarly.aiagent.tool.booking.record.ModifyBookingParams;
-import com.luna.aggarly.aiagent.tool.booking.record.ModifyBookingResponse;
 import com.luna.aggarly.booking.dto.BookingResponse;
 import com.luna.aggarly.booking.service.BookingService;
 import com.luna.aggarly.user.security.UserPrincipal;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.UUID;
+
 @Component
 @RequiredArgsConstructor
-public class ModifyBookingTool implements Tool<ModifyBookingParams, ModifyBookingResponse> {
+public class ModifyBookingTool implements Tool<ModifyBookingTool.Params, ModifyBookingTool.Response> {
+
+    public record Params(
+            @NotNull
+            @JsonPropertyDescription("The unique identifier of the booking reservation to modify.")
+            UUID bookingId,
+
+            @NotBlank
+            @JsonPropertyDescription("New check-in date formatted as YYYY-MM-DD.")
+            String checkIn,
+
+            @NotBlank
+            @JsonPropertyDescription("New check-out date formatted as YYYY-MM-DD.")
+            String checkOut
+    ) {}
+
+    public record Response(
+            UUID bookingId,
+            String status,
+            double priceDifference
+    ) {}
 
     private final BookingService bookingService;
     private final JsonSchemaService jsonSchemaService;
@@ -30,8 +53,8 @@ public class ModifyBookingTool implements Tool<ModifyBookingParams, ModifyBookin
     }
 
     @Override
-    public Class<ModifyBookingParams> parameterType() {
-        return ModifyBookingParams.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -45,9 +68,9 @@ public class ModifyBookingTool implements Tool<ModifyBookingParams, ModifyBookin
     }
 
     @Override
-    public ToolResult<ModifyBookingResponse> execute(ModifyBookingParams params, UserPrincipal user) {
+    public ToolResult<Response> execute(Params params, UserPrincipal user) {
         BookingResponse booking = bookingService.getById(params.bookingId(), user != null ? user.getUserId() : null);
-        ModifyBookingResponse resp = new ModifyBookingResponse(
+        Response resp = new Response(
                 booking.id(),
                 "DATES_MODIFIED_SUCCESSFULLY",
                 0.0
@@ -57,12 +80,11 @@ public class ModifyBookingTool implements Tool<ModifyBookingParams, ModifyBookin
 
     @Override
     public JsonNode parameterSchema() {
-        return jsonSchemaService.generate(ModifyBookingParams.class);
+        return jsonSchemaService.generate(Params.class);
     }
 
     @Override
     public JsonNode responseSchema() {
-        return jsonSchemaService.generate(ModifyBookingResponse.class);
+        return jsonSchemaService.generate(Response.class);
     }
 }
-

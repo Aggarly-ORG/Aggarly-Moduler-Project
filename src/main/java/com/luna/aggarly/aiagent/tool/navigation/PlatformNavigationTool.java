@@ -10,7 +10,11 @@ import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
-public class PlatformNavigationTool implements Tool<String, Map<String, String>> {
+public class PlatformNavigationTool implements Tool<PlatformNavigationTool.Params, Map<String, String>> {
+
+    public record Params(
+            String topic
+    ) {}
 
     @Override
     public String name() {
@@ -23,8 +27,8 @@ public class PlatformNavigationTool implements Tool<String, Map<String, String>>
     }
 
     @Override
-    public Class<String> parameterType() {
-        return String.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -33,8 +37,9 @@ public class PlatformNavigationTool implements Tool<String, Map<String, String>>
     }
 
     @Override
-    public ToolResult<Map<String, String>> execute(String topic, UserPrincipal user) {
-        String topicLower = topic != null ? topic.toLowerCase() : "";
+    public ToolResult<Map<String, String>> execute(Params params, UserPrincipal user) {
+        String topic = (params != null && params.topic() != null) ? params.topic() : "";
+        String topicLower = topic.toLowerCase();
         if (topicLower.contains("verify") || topicLower.contains("identity") || topicLower.contains("passport")) {
             return ToolResult.ok(Map.of("targetRoute", "/settings/verification", "label", "Identity Verification Settings"));
         } else if (topicLower.contains("payment") || topicLower.contains("payout") || topicLower.contains("card")) {

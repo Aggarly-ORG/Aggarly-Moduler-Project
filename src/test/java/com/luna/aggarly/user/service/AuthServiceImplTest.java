@@ -72,6 +72,9 @@ class AuthServiceImplTest {
     @Mock
     private EmailService emailService;
 
+    @Mock
+    private UserSessionService userSessionService;
+
     @InjectMocks
     private AuthServiceImpl authService;
 
@@ -182,7 +185,7 @@ class AuthServiceImplTest {
     }
 
     @Test
-    @DisplayName("Should login successfully and return tokens when credentials are valid")
+    @DisplayName("Should login successfully without revoking other device tokens (multi-device support)")
     void shouldLoginSuccessfully() {
         LoginRequest request = new LoginRequest("user@example.com", "password123");
         UserPrincipal principal = new UserPrincipal(testUser);
@@ -196,7 +199,9 @@ class AuthServiceImplTest {
         assertThat(response).isNotNull();
         assertThat(response.status()).isEqualTo(AuthStatus.AUTH_SUCCESS);
         assertThat(response.token()).isEqualTo("access-jwt-token");
-        verify(refreshTokenRepository, times(1)).revokeAllUserTokens(testUser);
+        // Verify other devices are NOT revoked on login
+        verify(refreshTokenRepository, never()).revokeAllUserTokens(any());
+        verify(refreshTokenRepository, times(1)).save(any(RefreshToken.class));
     }
 
     @Test
@@ -230,15 +235,17 @@ class AuthServiceImplTest {
     }
 
     @Test
-    @DisplayName("Should refresh access token when valid refresh token is provided")
+    @DisplayName("Should refresh access token, record revokedAt and replacedByToken, and maintain same familyId")
     void shouldRefreshTokenSuccessfully() {
         String oldRefreshTokenVal = "old-refresh-token";
         String expiredAccessToken = "expired-access-token";
+        UUID familyId = UUID.randomUUID();
 
         String hash = ReflectionTestUtils.invokeMethod(authService, "hashToken", expiredAccessToken);
 
         RefreshToken oldToken = RefreshToken.builder()
                 .token(oldRefreshTokenVal)
+                .familyId(familyId)
                 .associatedAccessTokenHash(hash)
                 .user(testUser)
                 .expiryDate(Instant.now().plusSeconds(3600))
@@ -254,32 +261,103 @@ class AuthServiceImplTest {
 
         assertThat(response).isNotNull();
         assertThat(response.token()).isEqualTo("new-access-jwt");
+        assertThat(response.refreshToken()).isNotNull();
         assertThat(oldToken.isRevoked()).isTrue();
+        assertThat(oldToken.getRevokedAt()).isNotNull();
+        assertThat(oldToken.getReplacedByToken()).isEqualTo(response.refreshToken());
+        assertThat(oldToken.getFamilyId()).isEqualTo(familyId);
     }
 
     @Test
-    @DisplayName("Should revoke all tokens and throw exception if refresh token is expired or revoked")
-    void shouldRevokeAllTokensWhenRefreshTokenExpired() {
+    @DisplayName("Should return active replacement token within 15-second grace window (race condition protection)")
+    void shouldReturnActiveTokenWithinGraceWindow() {
+        String oldRefreshTokenVal = "replayed-refresh-token";
+        String replacementTokenVal = "active-replacement-token";
+        UUID familyId = UUID.randomUUID();
+
+        // Token revoked 4 seconds ago (within 15s mercy window)
+        RefreshToken oldToken = RefreshToken.builder()
+                .token(oldRefreshTokenVal)
+                .familyId(familyId)
+                .user(testUser)
+                .expiryDate(Instant.now().plusSeconds(3600))
+                .revoked(true)
+                .revokedAt(Instant.now().minusSeconds(4))
+                .replacedByToken(replacementTokenVal)
+                .build();
+
+        RefreshToken activeReplacement = RefreshToken.builder()
+                .token(replacementTokenVal)
+                .familyId(familyId)
+                .user(testUser)
+                .expiryDate(Instant.now().plusSeconds(3600))
+                .revoked(false)
+                .build();
+
+        RefreshTokenRequest request = new RefreshTokenRequest(oldRefreshTokenVal, null);
+
+        when(refreshTokenRepository.findByToken(oldRefreshTokenVal)).thenReturn(Optional.of(oldToken));
+        when(refreshTokenRepository.findByToken(replacementTokenVal)).thenReturn(Optional.of(activeReplacement));
+        when(jwtService.generateToken(testUser)).thenReturn("grace-window-access-jwt");
+
+        AuthResponse response = authService.refresh(request);
+
+        assertThat(response).isNotNull();
+        assertThat(response.token()).isEqualTo("grace-window-access-jwt");
+        assertThat(response.refreshToken()).isEqualTo(replacementTokenVal);
+        // Ensure family was NOT revoked during grace window
+        verify(refreshTokenRepository, never()).revokeFamily(eq(familyId), any(Instant.class));
+    }
+
+    @Test
+    @DisplayName("Should detect token theft and revoke entire family when replayed after 15-second grace window")
+    void shouldRevokeFamilyOnReplayAfterGracePeriod() {
+        String stolenTokenVal = "stolen-token";
+        UUID familyId = UUID.randomUUID();
+
+        // Token revoked 45 seconds ago (outside 15s mercy window)
+        RefreshToken stolenToken = RefreshToken.builder()
+                .token(stolenTokenVal)
+                .familyId(familyId)
+                .user(testUser)
+                .expiryDate(Instant.now().plusSeconds(3600))
+                .revoked(true)
+                .revokedAt(Instant.now().minusSeconds(45))
+                .replacedByToken("replacement-already-issued")
+                .build();
+
+        RefreshTokenRequest request = new RefreshTokenRequest(stolenTokenVal, null);
+        when(refreshTokenRepository.findByToken(stolenTokenVal)).thenReturn(Optional.of(stolenToken));
+
+        assertThatThrownBy(() -> authService.refresh(request))
+                .isInstanceOf(InvalidRefreshTokenException.class)
+                .hasMessageContaining("Compromised session detected. Token family revoked.");
+
+        verify(refreshTokenRepository, times(1)).revokeFamily(eq(familyId), any(Instant.class));
+    }
+
+    @Test
+    @DisplayName("Should revoke family and throw exception when refresh token is expired")
+    void shouldRevokeFamilyWhenRefreshTokenExpired() {
         String oldRefreshTokenVal = "expired-refresh-token";
-        String expiredAccessToken = "expired-access-token";
-        String hash = ReflectionTestUtils.invokeMethod(authService, "hashToken", expiredAccessToken);
+        UUID familyId = UUID.randomUUID();
 
         RefreshToken oldToken = RefreshToken.builder()
                 .token(oldRefreshTokenVal)
-                .associatedAccessTokenHash(hash)
+                .familyId(familyId)
                 .user(testUser)
                 .expiryDate(Instant.now().minusSeconds(3600)) // expired
                 .revoked(false)
                 .build();
 
-        RefreshTokenRequest request = new RefreshTokenRequest(oldRefreshTokenVal, "expired-access-token");
+        RefreshTokenRequest request = new RefreshTokenRequest(oldRefreshTokenVal, null);
         when(refreshTokenRepository.findByToken(oldRefreshTokenVal)).thenReturn(Optional.of(oldToken));
 
         assertThatThrownBy(() -> authService.refresh(request))
                 .isInstanceOf(InvalidRefreshTokenException.class)
-                .hasMessageContaining("Refresh token is expired or has been reused.");
+                .hasMessageContaining("Refresh token is expired. Please log in again.");
 
-        verify(refreshTokenRepository, times(1)).revokeAllUserTokens(testUser);
+        verify(refreshTokenRepository, times(1)).revokeFamily(eq(familyId), any(Instant.class));
     }
 
     @Test

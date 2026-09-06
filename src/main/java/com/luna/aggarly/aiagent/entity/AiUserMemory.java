@@ -1,7 +1,9 @@
 package com.luna.aggarly.aiagent.entity;
 
 import com.luna.aggarly.common.entity.BaseEntity;
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
 import lombok.*;
 
 import java.util.UUID;
@@ -26,9 +28,4 @@ public class AiUserMemory extends BaseEntity {
 
     @Column(nullable = false)
     private boolean userConfirmed;
-
-    public String getMemoryKey() { return memoryKey; }
-    public String getMemoryValue() { return memoryValue; }
-    public UUID getUserId() { return userId; }
-    public boolean isUserConfirmed() { return userConfirmed; }
 }

@@ -1,20 +1,37 @@
 package com.luna.aggarly.aiagent.tool.booking;
 
+import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.luna.aggarly.aiagent.schema.JsonSchemaService;
 import com.luna.aggarly.aiagent.tool.Tool;
 import com.luna.aggarly.aiagent.tool.ToolResult;
-import com.luna.aggarly.aiagent.tool.booking.record.CheckInInstructionsParams;
-import com.luna.aggarly.aiagent.tool.booking.record.CheckInInstructionsResponse;
 import com.luna.aggarly.booking.dto.BookingResponse;
 import com.luna.aggarly.booking.service.BookingService;
 import com.luna.aggarly.user.security.UserPrincipal;
+import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.UUID;
+
 @Component
 @RequiredArgsConstructor
-public class CheckInInstructionsTool implements Tool<CheckInInstructionsParams, CheckInInstructionsResponse> {
+public class CheckInInstructionsTool implements Tool<CheckInInstructionsTool.Params, CheckInInstructionsTool.Response> {
+
+    public record Params(
+            @NotNull
+            @JsonPropertyDescription("The unique identifier of the confirmed booking reservation.")
+            UUID bookingId
+    ) {}
+
+    public record Response(
+            UUID bookingId,
+            String keylessEntryCode,
+            String wifiNetwork,
+            String wifiPassword,
+            String parkingSpot,
+            String checkInNotes
+    ) {}
 
     private final BookingService bookingService;
     private final JsonSchemaService jsonSchemaService;
@@ -30,8 +47,8 @@ public class CheckInInstructionsTool implements Tool<CheckInInstructionsParams, 
     }
 
     @Override
-    public Class<CheckInInstructionsParams> parameterType() {
-        return CheckInInstructionsParams.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -45,9 +62,9 @@ public class CheckInInstructionsTool implements Tool<CheckInInstructionsParams, 
     }
 
     @Override
-    public ToolResult<CheckInInstructionsResponse> execute(CheckInInstructionsParams params, UserPrincipal user) {
+    public ToolResult<Response> execute(Params params, UserPrincipal user) {
         BookingResponse booking = bookingService.getById(params.bookingId(), user != null ? user.getUserId() : null);
-        CheckInInstructionsResponse resp = new CheckInInstructionsResponse(
+        Response resp = new Response(
                 booking.id(),
                 "4829#",
                 "LunaGuest_5G",
@@ -60,12 +77,11 @@ public class CheckInInstructionsTool implements Tool<CheckInInstructionsParams, 
 
     @Override
     public JsonNode parameterSchema() {
-        return jsonSchemaService.generate(CheckInInstructionsParams.class);
+        return jsonSchemaService.generate(Params.class);
     }
 
     @Override
     public JsonNode responseSchema() {
-        return jsonSchemaService.generate(CheckInInstructionsResponse.class);
+        return jsonSchemaService.generate(Response.class);
     }
 }
-

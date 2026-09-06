@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -37,8 +38,9 @@ class MultimodalEmbeddingServiceTest {
         VisionCacheService cacheService = Mockito.mock(VisionCacheService.class);
         OllamaVisionClient ollamaClient = Mockito.mock(OllamaVisionClient.class);
         PerceptualHashService pHashService = Mockito.mock(PerceptualHashService.class);
+        com.luna.aggarly.vision.client.ClipServiceClient clipClient = Mockito.mock(com.luna.aggarly.vision.client.ClipServiceClient.class);
 
-        embeddingService = new MultimodalEmbeddingService(cacheService, ollamaClient, pHashService);
+        embeddingService = new MultimodalEmbeddingService(cacheService, ollamaClient, pHashService, clipClient);
         scoreFusionService = new ScoreFusionService();
         scoreAggregator = new PropertyScoreAggregator();
         contextualFilter = new VisionContextualFilter();
@@ -52,6 +54,27 @@ class MultimodalEmbeddingServiceTest {
             normB += b[i] * b[i];
         }
         return (float) (dot / (Math.sqrt(normA) * Math.sqrt(normB)));
+    }
+
+    @Test
+    @DisplayName("Verify perceptual hash projection gives 1.0 for same image and ~0.0 for shoe vs pool")
+    void testPerceptualHashOrthogonalProjection() {
+        String poolHash = "ff80c0e070381c0e";
+        String samePoolHash = "ff80c0e070381c0e";
+        String shoeHash = "007f3f1f8fc7e3f1";
+
+        float[] poolVec = embeddingService.projectPerceptualHashToVector(poolHash);
+        float[] samePoolVec = embeddingService.projectPerceptualHashToVector(samePoolHash);
+        float[] shoeVec = embeddingService.projectPerceptualHashToVector(shoeHash);
+
+        float sameSimilarity = cosineSimilarity(poolVec, samePoolVec);
+        float shoeVsPoolSimilarity = cosineSimilarity(shoeVec, poolVec);
+
+        System.out.println("Same Image Similarity: " + sameSimilarity);
+        System.out.println("Shoe vs Pool Similarity: " + shoeVsPoolSimilarity);
+
+        assertEquals(1.0f, sameSimilarity, 0.001f, "Identical image must have 1.00 cosine similarity");
+        assertTrue(shoeVsPoolSimilarity < 0.15f, "Unrelated shoe vs pool image must have near-zero (< 0.15) similarity, was: " + shoeVsPoolSimilarity);
     }
 
     @Test

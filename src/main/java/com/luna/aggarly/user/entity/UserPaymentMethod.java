@@ -9,7 +9,9 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "user_payment_methods")
+@Table(name = "user_payment_methods", uniqueConstraints = {
+        @UniqueConstraint(name = "uq_user_payment_methods_user_stripe", columnNames = {"user_id", "stripe_payment_method_id"})
+})
 @Getter
 @Setter
 @NoArgsConstructor

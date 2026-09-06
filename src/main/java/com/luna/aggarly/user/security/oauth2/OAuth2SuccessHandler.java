@@ -3,8 +3,10 @@ package com.luna.aggarly.user.security.oauth2;
 import com.luna.aggarly.common.security.jwt.JwtService;
 import com.luna.aggarly.user.entity.RefreshToken;
 import com.luna.aggarly.user.entity.User;
+import com.luna.aggarly.user.entity.UserSession;
 import com.luna.aggarly.user.repository.RefreshTokenRepository;
 import com.luna.aggarly.user.security.UserPrincipal;
+import com.luna.aggarly.user.service.UserSessionService;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -33,11 +35,12 @@ public class OAuth2SuccessHandler implements AuthenticationSuccessHandler {
 
     private final JwtService jwtService;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final UserSessionService userSessionService;
 
     @Value("${app.jwt.refresh-expiration-days:7}")
     private int refreshExpirationDays;
 
-    @Value("${app.oauth2.frontend-redirect-url:http://localhost:8081/oauth2-success.html}")
+    @Value("${app.oauth2.frontend-redirect-url:http://localhost:3000/oauth2/callback}")
     private String frontendRedirectUrl;
 
     @Override
@@ -49,15 +52,18 @@ public class OAuth2SuccessHandler implements AuthenticationSuccessHandler {
         UserPrincipal userDetails = (UserPrincipal) authentication.getPrincipal();
         User user = userDetails.getUser();
 
-        // Revoke any existing active refresh tokens
-        refreshTokenRepository.revokeAllUserTokens(user);
+        // Create active user device session
+        UUID familyId = UUID.randomUUID();
+        UserSession session = userSessionService.createSession(user, familyId, request);
+        UUID sessionId = session != null ? session.getId() : null;
 
-        // Generate Access and Refresh tokens
-        String accessToken = jwtService.generateToken(userDetails);
+        // Generate Access and Refresh tokens with dedicated session familyId and sessionId
+        String accessToken = jwtService.generateToken(userDetails, sessionId);
         String refreshTokenValue = UUID.randomUUID().toString();
 
         RefreshToken refreshToken = RefreshToken.builder()
                 .token(refreshTokenValue)
+                .familyId(familyId)
                 .associatedAccessTokenHash(hashToken(accessToken))
                 .user(user)
                 .expiryDate(Instant.now().plus(Duration.ofDays(refreshExpirationDays)))
@@ -65,8 +71,8 @@ public class OAuth2SuccessHandler implements AuthenticationSuccessHandler {
                 .build();
         refreshTokenRepository.save(refreshToken);
 
-        // Redirect to Frontend URL passing tokens as URL query params
-        String redirectUrl = String.format("%s?token=%s&refreshToken=%s",
+        // Redirect to Frontend URL passing tokens via URL fragment (#) so tokens are never leaked to server access logs or Referer headers
+        String redirectUrl = String.format("%s#token=%s&refreshToken=%s",
                 frontendRedirectUrl, accessToken, refreshTokenValue);
 
         response.sendRedirect(redirectUrl);

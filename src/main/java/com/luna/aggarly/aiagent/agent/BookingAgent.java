@@ -12,17 +12,17 @@ import com.luna.aggarly.common.security.SecurityUtils;
 import com.luna.aggarly.user.security.UserPrincipal;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
 
+@Slf4j
 @Component
 public class BookingAgent implements Agent {
 
-    private static final Logger log = LoggerFactory.getLogger(BookingAgent.class);
     private static final int MAX_AGENT_TURNS = 6;
 
     private static final String BOOKING_AGENT_SYSTEM_PROMPT = """
@@ -116,7 +116,7 @@ public class BookingAgent implements Agent {
         When the user asks whether a property is available:
 
         1. Determine the property and dates.
-        2. Call property.availability.
+        2. Call property.calendar with checkIn and checkOut to get the availability verdict.
         3. Treat the tool result as authoritative.
         4. Clearly report the availability result.
 
@@ -144,20 +144,15 @@ public class BookingAgent implements Agent {
         replace it with your own calculation.
 
         ================================================================
-        BOOKING CREATION
+        BOOKING CREATION & CONFIRMATION (CRITICAL)
         ================================================================
 
-        Before creating a booking:
-
-        1. Ensure all required booking information is available.
-        2. Verify availability when necessary.
-        3. Obtain the authoritative price when necessary.
-        4. Only then call booking.create.
-
-        Never tell the user that a booking was created unless
-        booking.create successfully reports that it was created.
-
-        If booking.create fails, clearly report the failure.
+        When the user or supervisor asks to book or reserve a property:
+        1. If propertyId, checkIn, and checkOut are provided in the instruction, CALL `booking.create` DIRECTLY in turn 1.
+        2. DO NOT call `property.calendar` in a separate turn when explicitly asked to book. The `booking.create` tool checks availability and creates the reservation atomically.
+        3. Never call `property.calendar` repeatedly in multiple turns for the same property and dates.
+        4. Once `booking.create` returns awaiting confirmation, summarize the reservation and output the confirmation prompt. NEVER make another tool call.
+        5. If booking.create fails, clearly report the failure.
 
         ================================================================
         BOOKING CANCELLATION
@@ -284,7 +279,7 @@ public class BookingAgent implements Agent {
 
         Possible flow:
 
-        property.availability
+        property.calendar (checkIn + checkOut)
                 ↓
         booking.priceExplanation
                 ↓
@@ -292,7 +287,7 @@ public class BookingAgent implements Agent {
 
         For booking creation:
 
-        property.availability
+        property.calendar (checkIn + checkOut)
                 ↓
         price calculation
                 ↓
@@ -306,6 +301,17 @@ public class BookingAgent implements Agent {
         result is insufficient or the user explicitly changed the request.
 
         ================================================================
+        RUNTIME EXPRESSION INJECTION & DYNAMIC FUNCTIONS
+        ================================================================
+        When invoking tools, you have access to Aggarly's Runtime Expression Engine.
+        All tool arguments are dynamically pre-evaluated through the expression engine before execution!
+        You can use:
+        - Root Object & Context: {{obj.<field>}}, {{user.id}}, {{current_conversation()}}, {{origin_channel()}}
+        - Date Functions: {{today()}}, {{now()}}, {{date_add(today(), 3, 'DAYS')}}, {{date_sub(today(), 1, 'MONTHS')}}, {{format_date(today(), 'yyyy-MM-dd')}}
+        - Entity Lookups: {{property('<id>').title}}, {{booking('<id>').status}}, {{user('<id>').email}}
+        - String & Math Utilities: {{upper(str)}}, {{format_currency(amount, 'USD')}}, {{join(list, ', ')}}, {{first(list)}}, {{coalesce(a, b)}}, {{ternary(cond, trueVal, falseVal)}}
+
+        ================================================================
         FINAL ANSWERS & UI FORMATTING FOR AGGARLY
         ================================================================
 
@@ -317,7 +323,7 @@ public class BookingAgent implements Agent {
            Example:
            "Your Mediterranean escape is confirmed and awaits your arrival."
 
-           Follow the quote with a blank line (\\n\\n) and then your clear, reassuring narrative.
+           Follow the quote with a blank line (\n\n) and then your clear, reassuring narrative.
 
         2. STRUCTURED BOOKING & CHECK-IN PRESENTATION:
            - Present price breakdowns item by item (Lodging, Cleaning, Fees, Total with currency).
@@ -533,6 +539,8 @@ public class BookingAgent implements Agent {
     private final ConfirmationGate confirmationGate;
     private final ObjectMapper objectMapper;
     private final Validator validator;
+    private final com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher activityPublisher;
+    private final com.luna.aggarly.common.expression.ExpressionEngine expressionEngine;
 
     private final Map<String, Tool<?, ?>> toolRegistry = new HashMap<>();
 
@@ -542,17 +550,24 @@ public class BookingAgent implements Agent {
             ConfirmationGate confirmationGate,
             ObjectMapper objectMapper,
             Validator validator,
-            List<Tool<?, ?>> tools
+            @Autowired(required = false) com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher activityPublisher,
+            @Autowired(required = false) com.luna.aggarly.common.expression.ExpressionEngine expressionEngine,
+            @Qualifier("toolRegistry") Map<String, Tool<?, ?>> sharedToolRegistry
     ) {
         this.llmClient = llmClient;
         this.confirmationGate = confirmationGate;
         this.objectMapper = objectMapper;
         this.validator = validator;
+        this.activityPublisher = activityPublisher;
+        this.expressionEngine = expressionEngine;
 
-        if (tools != null) {
-            for (Tool<?, ?> tool : tools) {
-                if (SUPPORTED_TOOLS.contains(tool.name())) {
-                    toolRegistry.put(tool.name(), tool);
+        if (sharedToolRegistry != null) {
+            for (String toolName : SUPPORTED_TOOLS) {
+                Tool<?, ?> tool = sharedToolRegistry.get(toolName);
+                if (tool != null) {
+                    toolRegistry.put(toolName, tool);
+                } else {
+                    log.warn("BookingAgent: declared tool '{}' has no registered implementation", toolName);
                 }
             }
         }
@@ -571,14 +586,12 @@ public class BookingAgent implements Agent {
             "booking.confirm",
             "booking.checkInInstructions",
             "payment.status",
-            "property.availability",
             "property.calendar",
             "user.history",
             "document.analysis",
             "review.create",
             "review.generateDraft",
             "notification.createAlert",
-            "notification.priceTracking",
             "notification.scheduleReminder"
     );
 
@@ -622,9 +635,16 @@ public class BookingAgent implements Agent {
         List<ChatMessage> messages = buildConversation(intent, context);
         List<String> executedTools = new ArrayList<>();
         Map<String, Object> metadataCollector = new HashMap<>();
+        List<Map<String, Object>> executionSteps = new ArrayList<>();
+        long agentStartTime = System.currentTimeMillis();
+        UUID convId = context != null ? context.conversationId() : null;
 
         for (int turn = 1; turn <= MAX_AGENT_TURNS; turn++) {
             log.debug("BookingAgent turn {}/{}", turn, MAX_AGENT_TURNS);
+            long turnStartTime = System.currentTimeMillis();
+            if (activityPublisher != null && convId != null) {
+                activityPublisher.publishTurnStart(convId, "BookingAgent", turn, MAX_AGENT_TURNS, messages.size(), toolDefinitions.size());
+            }
 
             LlmToolCallResponse llmResponse;
             try {
@@ -634,12 +654,39 @@ public class BookingAgent implements Agent {
                 return failureResponse("I couldn't process your booking request right now.", executedTools);
             }
 
+            long turnDuration = System.currentTimeMillis() - turnStartTime;
+            if (activityPublisher != null && convId != null) {
+                List<String> proposedTools = llmResponse.hasToolCalls()
+                        ? llmResponse.toolCalls().stream().map(LlmToolCall::name).toList()
+                        : List.of();
+                activityPublisher.publishTurnEnd(convId, "BookingAgent", turn, MAX_AGENT_TURNS, turnDuration, proposedTools);
+            }
+
             if (!llmResponse.hasToolCalls()) {
+                long synthStart = System.currentTimeMillis();
+                if (activityPublisher != null && convId != null) {
+                    activityPublisher.publishSynthesisStart(convId, "BookingAgent");
+                }
                 String response = llmResponse.textResponse();
                 if (response == null || response.isBlank()) {
                     log.warn("BookingAgent received empty final response");
                     return failureResponse("I couldn't complete your request.", executedTools);
                 }
+
+                List<com.luna.aggarly.aiagent.engine.model.LumenResponseBlock> backendBlocks = new ArrayList<>(
+                        com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.extractBlocksFromMetadata(metadataCollector)
+                );
+
+                if (!executionSteps.isEmpty()) {
+                    Map<String, Object> planData = new LinkedHashMap<>();
+                    planData.put("title", "Booking & Reservation Plan");
+                    planData.put("totalSteps", executionSteps.size());
+                    planData.put("totalDurationMs", System.currentTimeMillis() - agentStartTime);
+                    planData.put("steps", executionSteps);
+                    backendBlocks.add(0, com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.executionPlan(planData));
+                    metadataCollector.put("executionPlan", executionSteps);
+                }
+
                 String metadataJson = null;
                 if (!metadataCollector.isEmpty()) {
                     try {
@@ -650,8 +697,15 @@ public class BookingAgent implements Agent {
                 }
                 String formattedJson = com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.formatResponse(
                         response,
-                        com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.extractBlocksFromMetadata(metadataCollector)
+                        backendBlocks
                 );
+
+                if (activityPublisher != null && convId != null) {
+                    long synthDuration = System.currentTimeMillis() - synthStart;
+                    activityPublisher.publishSynthesisEnd(convId, "BookingAgent", synthDuration, "Generated booking details, pricing & confirmation summary");
+                    activityPublisher.publishCompleted(convId, "BookingAgent", System.currentTimeMillis() - agentStartTime, executedTools.size(), turn);
+                }
+
                 return AgentResponse.builder()
                         .text(formattedJson)
                         .toolCalls(List.copyOf(executedTools))
@@ -679,10 +733,18 @@ public class BookingAgent implements Agent {
                     continue;
                 }
 
+                if (activityPublisher != null && convId != null) {
+                    activityPublisher.publishToolStart(convId, "BookingAgent", toolName, toolCall.arguments(), turn);
+                }
+                long start = System.currentTimeMillis();
+
                 UUID userId = SecurityUtils.getCurrentUserId();
 
                 if (userId == null && toolRequiresAuthenticatedUser(tool)) {
                     log.warn("Unauthenticated user attempted tool '{}'", toolName);
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "BookingAgent", toolName, System.currentTimeMillis() - start, toolCall.arguments(), "Authentication required", false, turn);
+                    }
                     messages.add(ChatMessage.toolResponse(toolName,
                             """
                             {
@@ -704,15 +766,87 @@ public class BookingAgent implements Agent {
                             toolName, toolCall.arguments(), "booking", List.copyOf(messages));
                     String token = confirmationGate.registerPendingConfirmation(userId, toolName, state);
                     log.info("Confirmation required: user={}, tool={}, token={}", userId, toolName, token);
-                    return AgentResponse.awaitingConfirmation(
-                            buildConfirmationMessage(toolName), token, toolName, List.copyOf(executedTools));
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "BookingAgent", toolName, System.currentTimeMillis() - start, toolCall.arguments(), "Awaiting guest confirmation", true, turn);
+                    }
+
+                    Map<String, Object> confData = new LinkedHashMap<>();
+                    confData.put("title", "Booking Confirmation Required");
+                    confData.put("message", buildConfirmationMessage(toolName));
+                    confData.put("toolName", toolName);
+                    confData.put("pendingToolName", toolName);
+                    confData.put("confirmationToken", token);
+                    confData.put("confirmEndpoint", "/api/v1/ai/confirm/" + token);
+                    confData.put("rejectEndpoint", "/api/v1/ai/reject/" + token);
+                    confData.put("actionType", toolName != null ? toolName.toUpperCase().replace('.', '_') : "BOOKING_CREATE");
+                    confData.put("confirmLabel", "Confirm Booking");
+                    confData.put("cancelLabel", "Cancel");
+                    if (toolCall.arguments() != null) {
+                        confData.put("parameters", toolCall.arguments());
+                    }
+
+                    List<com.luna.aggarly.aiagent.engine.model.LumenResponseBlock> confBlocks = new ArrayList<>(
+                            com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.extractBlocksFromMetadata(metadataCollector)
+                    );
+                    confBlocks.add(com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.confirmation(confData));
+                    confBlocks.add(com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.actions(List.of(
+                            Map.of("id", "confirm-" + token, "label", "Confirm & Proceed", "variant", "primary", "action", "ai.confirm", "confirmationToken", token),
+                            Map.of("id", "cancel-" + token, "label", "Cancel", "variant", "secondary", "action", "ai.cancel", "confirmationToken", token)
+                    )));
+
+                    if (!executionSteps.isEmpty()) {
+                        Map<String, Object> planData = new LinkedHashMap<>();
+                        planData.put("title", "Booking & Reservation Plan");
+                        planData.put("totalSteps", executionSteps.size());
+                        planData.put("totalDurationMs", System.currentTimeMillis() - agentStartTime);
+                        planData.put("steps", executionSteps);
+                        confBlocks.add(0, com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.executionPlan(planData));
+                    }
+
+                    String formattedJson = com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.formatResponse(
+                            buildConfirmationMessage(toolName),
+                            confBlocks
+                    );
+
+                    String confMetaJson = null;
+                    if (!metadataCollector.isEmpty()) {
+                        try {
+                            confMetaJson = objectMapper.writeValueAsString(metadataCollector);
+                        } catch (Exception ignored) {}
+                    }
+
+                    return AgentResponse.builder()
+                            .text(formattedJson)
+                            .toolCalls(List.copyOf(executedTools))
+                            .requiresConfirmation(true)
+                            .confirmationToken(token)
+                            .pendingToolName(toolName)
+                            .metadataJson(confMetaJson)
+                            .build();
                 }
 
                 Object typedParameters;
                 try {
-                    typedParameters = objectMapper.convertValue(toolCall.arguments(), tool.parameterType());
+                    Object rawArgs = toolCall.arguments();
+                    if (expressionEngine != null && rawArgs != null) {
+                        com.luna.aggarly.scheduler.workflow.ExecutionContext exprCtx =
+                                com.luna.aggarly.scheduler.workflow.ExecutionContext.forTask(
+                                        userId != null ? userId : (user != null ? user.getUserId() : null),
+                                        null,
+                                        null,
+                                        "UTC"
+                                );
+                        if (convId != null) {
+                            exprCtx.variables().put("conversationId", convId.toString());
+                        }
+                        rawArgs = expressionEngine.resolve(rawArgs, exprCtx);
+                    }
+                    typedParameters = objectMapper.convertValue(rawArgs, tool.parameterType());
                 } catch (IllegalArgumentException ex) {
                     log.warn("Invalid arguments for tool '{}': {}", toolName, ex.getMessage());
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "BookingAgent", toolName, System.currentTimeMillis() - start, toolCall.arguments(), "Invalid arguments", false, turn);
+                    }
                     messages.add(ChatMessage.toolResponse(toolName,
                             """
                             {
@@ -735,6 +869,9 @@ public class BookingAgent implements Agent {
                             .reduce((a, b) -> a + "; " + b)
                             .orElse("Invalid arguments.");
                     log.warn("Validation failed for '{}': {}", toolName, validationMessage);
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "BookingAgent", toolName, System.currentTimeMillis() - start, toolCall.arguments(), validationMessage, false, turn);
+                    }
                     messages.add(ChatMessage.toolResponse(toolName,
                             createErrorJson("INVALID_ARGUMENTS", validationMessage)));
                     continue;
@@ -747,6 +884,21 @@ public class BookingAgent implements Agent {
                     ToolResult<Object> result = executableTool.execute(typedParameters, user);
                     executedTools.add(toolName);
 
+                    long duration = System.currentTimeMillis() - start;
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "BookingAgent", toolName, duration, toolCall.arguments(), result.getData(), result.isSuccess(), turn);
+                    }
+
+                    Map<String, Object> step = new LinkedHashMap<>();
+                    step.put("stepNumber", executionSteps.size() + 1);
+                    step.put("agentName", "BookingAgent");
+                    step.put("toolName", toolName);
+                    step.put("status", result.isSuccess() ? "COMPLETED" : "FAILED");
+                    step.put("durationMs", duration);
+                    step.put("input", toolCall.arguments());
+                    step.put("summary", result.isSuccess() ? "Executed " + toolName + " successfully" : "Execution failed");
+                    executionSteps.add(step);
+
                     if (result.isSuccess() && result.getData() != null) {
                         if (toolName.equals("booking.status") || toolName.equals("booking.checkInInstructions") || toolName.equals("booking.confirm")) {
                             metadataCollector.put("cardType", "BOOKING_TIMELINE");
@@ -757,10 +909,10 @@ public class BookingAgent implements Agent {
                         } else if (toolName.equals("payment.status")) {
                             metadataCollector.put("cardType", "PAYMENT_PROMPT");
                             metadataCollector.put("paymentData", result.getData());
-                        } else if (toolName.equals("property.availability")) {
+                        } else if (toolName.equals("property.calendar")) {
                             metadataCollector.put("cardType", "AVAILABILITY_CALENDAR");
                             metadataCollector.put("calendarData", result.getData());
-                        } else if (toolName.equals("booking.priceExplanation") || toolName.equals("notification.priceTracking")) {
+                        } else if (toolName.equals("booking.priceExplanation")) {
                             metadataCollector.put("priceBreakdown", result.getData());
                         }
                     }
@@ -768,7 +920,11 @@ public class BookingAgent implements Agent {
                     messages.add(ChatMessage.assistant(createToolCallMessage(toolCall)));
                     messages.add(ChatMessage.toolResponse(toolName, serializeToolResult(result)));
                 } catch (Exception ex) {
-                    log.error("Tool '{}' failed during BookingAgent turn {}", toolName, turn, ex);
+                    log.error("Tool '{}' failed", toolName, ex);
+                    long duration = System.currentTimeMillis() - start;
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "BookingAgent", toolName, duration, toolCall.arguments(), ex.getMessage(), false, turn);
+                    }
                     messages.add(ChatMessage.toolResponse(toolName,
                             createErrorJson("TOOL_EXECUTION_FAILED", "The requested operation could not be completed.")));
                 }
@@ -881,8 +1037,8 @@ public class BookingAgent implements Agent {
         return tool.requiresAuthentication();
     }
 
-    public AgentResponse resumeFromConfirmation(PendingConfirmationState state, UserPrincipal ignoredUser) {
-        UserPrincipal user = SecurityUtils.getCurrentUserPrincipal();
+    public AgentResponse resumeFromConfirmation(PendingConfirmationState state, UserPrincipal callerUser) {
+        UserPrincipal user = callerUser != null ? callerUser : SecurityUtils.getCurrentUserPrincipal();
         Objects.requireNonNull(state, "state must not be null");
         log.info("BookingAgent resuming from confirmation: tool={}, user={}",
                 state.toolName(), user != null ? user.getUserId() : "anonymous");
@@ -1027,10 +1183,10 @@ public class BookingAgent implements Agent {
                 } else if (toolName.equals("payment.status") || toolName.equals("booking.create")) {
                     metadataCollector.put("cardType", "PAYMENT_PROMPT");
                     metadataCollector.put("paymentData", result.getData());
-                } else if (toolName.equals("property.availability") || toolName.equals("property.calendar")) {
+                } else if (toolName.equals("property.calendar")) {
                     metadataCollector.put("cardType", "AVAILABILITY_CALENDAR");
                     metadataCollector.put("calendarData", result.getData());
-                } else if (toolName.equals("booking.priceExplanation") || toolName.equals("notification.priceTracking")) {
+                } else if (toolName.equals("booking.priceExplanation")) {
                     metadataCollector.put("priceBreakdown", result.getData());
                 }
             }

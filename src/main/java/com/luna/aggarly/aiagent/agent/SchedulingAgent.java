@@ -10,25 +10,23 @@ import com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter;
 import com.luna.aggarly.aiagent.engine.records.*;
 import com.luna.aggarly.aiagent.tool.Tool;
 import com.luna.aggarly.aiagent.tool.ToolResult;
-import com.luna.aggarly.aiagent.tool.schedule.record.CreateScheduleResponse;
 import com.luna.aggarly.common.security.SecurityUtils;
 import com.luna.aggarly.user.security.UserPrincipal;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
+@Slf4j
 @Component
 public class SchedulingAgent implements Agent {
 
-    private static final Logger log = LoggerFactory.getLogger(SchedulingAgent.class);
     private static final int MAX_AGENT_TURNS = 5;
 
     private static final String SCHEDULING_AGENT_SYSTEM_PROMPT = """
@@ -59,18 +57,13 @@ public class SchedulingAgent implements Agent {
         ================================================================
         AVAILABLE RUNTIME FUNCTIONS & DYNAMIC EXPRESSIONS
         ================================================================
-        - "{{obj.<path>}}": Full dot-path access into the entire execution configuration, trigger, and context:
-            * "{{obj.trigger.event.value}}": Event value from the trigger config
-            * "{{obj.trigger.config.<field>}}": Specific trigger configuration properties
-            * "{{obj.event.<fieldName>}}": Payload fields from an incoming domain event
-            * "{{obj.step.<stepId>.result}}": The output of a preceding step in the plan
-            * "{{obj.task.id}}", "{{obj.userId}}", "{{obj.timezone}}": Execution metadata
-        - "{{function.SecurityUtils.getCurrentUserId()}}": The task owner's UUID.
-        - "{{function.DateUtils.today()}}": Current date YYYY-MM-DD.
-        - "{{function.DateUtils.previousMonthStart()}}": First day of previous month.
-        - "{{function.DateUtils.previousMonthEnd()}}": Last day of previous month.
-        - "{{step.<stepId>.result}}": Shortcut for step result output.
-        - "{{event.<fieldName>}}": Shortcut for incoming domain event payload.
+        - Expressions can use `{{ ... }}` or `${{ ... }}`:
+            * Path Resolution: `{{step.<stepId>.result[0].id}}`, `{{event.<field>}}`, `{{user.id}}`, `{{context.taskId}}`
+            * Date Functions: `{{now()}}`, `{{today()}}`, `{{date_add(today(), 3, 'DAYS')}}`, `{{date_sub(today(), 1, 'MONTHS')}}`, `{{format_date(today(), 'MMMM d, yyyy')}}`
+            * Entity Lookups: `{{property(event.propertyId).title}}`, `{{booking(event.bookingId).totalAmount}}`
+            * String & Collection: `{{first(step.search.result).id}}`, `{{size(step.search.result)}}`, `{{upper(user.name)}}`, `{{join(step.tags.result, ', ')}}`
+            * Context: `{{current_conversation()}}`, `{{origin_channel()}}`
+        - Self-Verification: You can call `schedule.preview` to simulate and verify expressions before calling `schedule.create`.
 
         ================================================================
         TRIGGER TYPES & CONFIGURATION EXAMPLES
@@ -92,7 +85,7 @@ public class SchedulingAgent implements Agent {
                  "type": "service_call",
                  "service": "notification.sendEmail",
                  "arguments": {
-                   "userId": "{{function.SecurityUtils.getCurrentUserId()}}",
+                   "userId": "{{user.id}}",
                    "template": "HOST_EARNINGS_REPORT",
                    "data": "{{step.get_earnings.result}}"
                  }
@@ -116,7 +109,7 @@ public class SchedulingAgent implements Agent {
                  "type": "service_call",
                  "service": "notification.sendEmail",
                  "arguments": {
-                   "userId": "{{function.SecurityUtils.getCurrentUserId()}}",
+                   "userId": "{{user.id}}",
                    "template": "UPCOMING_RESERVATIONS",
                    "data": "{{step.reservations.result}}"
                  }
@@ -142,7 +135,11 @@ public class SchedulingAgent implements Agent {
              ]
            }
 
-        4. INTERVAL TRIGGER (e.g. "Every 3 days"):
+        4. EVENT_OFFSET TRIGGER (e.g. "Send check-in instructions 2 days before check-in"):
+           triggerType: "EVENT_OFFSET"
+           triggerConfig: {"event": "BOOKING.CHECK_IN", "offset": -2, "unit": "DAYS"}
+
+        5. INTERVAL TRIGGER (e.g. "Every 3 days"):
            triggerType: "INTERVAL"
            triggerConfig: {"every": 3, "unit": "DAYS"}
 
@@ -166,21 +163,32 @@ public class SchedulingAgent implements Agent {
         - Property Details: http://localhost:3000/properties/{propertyId}
         - Conversation View: http://localhost:3000/conversations/view/{conversationId}
         - Concierge Dashboard: http://localhost:3000/
+        ================================================================
+        RUNTIME EXPRESSION INJECTION & DYNAMIC FUNCTIONS
+        ================================================================
+        When invoking tools, you have access to Aggarly's Runtime Expression Engine.
+        All tool arguments are dynamically pre-evaluated through the expression engine before execution!
+        You can use:
+        - Root Object & Context: {{obj.<field>}}, {{user.id}}, {{current_conversation()}}, {{origin_channel()}}
+        - Date Functions: {{today()}}, {{now()}}, {{date_add(today(), 3, 'DAYS')}}, {{date_sub(today(), 1, 'MONTHS')}}, {{format_date(today(), 'yyyy-MM-dd')}}
+        - Entity Lookups: {{property('<id>').title}}, {{booking('<id>').status}}, {{user('<id>').email}}
+        - String & Math Utilities: {{upper(str)}}, {{format_currency(amount, 'USD')}}, {{join(list, ', ')}}, {{first(list)}}, {{coalesce(a, b)}}, {{ternary(cond, trueVal, falseVal)}}
+
         - Auth Portal: http://localhost:3000/oauth2/callback
         """;
 
     private static final Set<String> SUPPORTED_TOOLS = Set.of(
             "schedule.create",
             "schedule.list",
-            "schedule.pause",
-            "schedule.resume",
-            "schedule.runNow",
-            "schedule.cancel"
+            "schedule.control",
+            "schedule.preview"
     );
 
     private final LlmClient llmClient;
     private final ObjectMapper objectMapper;
     private final Validator validator;
+    private final com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher activityPublisher;
+    private final com.luna.aggarly.common.expression.ExpressionEngine expressionEngine;
     private final Map<String, Tool<?, ?>> toolRegistry = new HashMap<>();
 
     @Autowired
@@ -188,16 +196,23 @@ public class SchedulingAgent implements Agent {
             LlmClient llmClient,
             ObjectMapper objectMapper,
             Validator validator,
-            List<Tool<?, ?>> tools
+            @Autowired(required = false) com.luna.aggarly.aiagent.engine.activity.AgentActivityPublisher activityPublisher,
+            @Autowired(required = false) com.luna.aggarly.common.expression.ExpressionEngine expressionEngine,
+            @Qualifier("toolRegistry") Map<String, Tool<?, ?>> sharedToolRegistry
     ) {
         this.llmClient = llmClient;
         this.objectMapper = objectMapper;
         this.validator = validator;
+        this.activityPublisher = activityPublisher;
+        this.expressionEngine = expressionEngine;
 
-        if (tools != null) {
-            for (Tool<?, ?> tool : tools) {
-                if (SUPPORTED_TOOLS.contains(tool.name())) {
-                    toolRegistry.put(tool.name(), tool);
+        if (sharedToolRegistry != null) {
+            for (String toolName : SUPPORTED_TOOLS) {
+                Tool<?, ?> tool = sharedToolRegistry.get(toolName);
+                if (tool != null) {
+                    toolRegistry.put(toolName, tool);
+                } else {
+                    log.warn("SchedulingAgent: declared tool '{}' has no registered implementation", toolName);
                 }
             }
         }
@@ -233,9 +248,16 @@ public class SchedulingAgent implements Agent {
         List<ChatMessage> messages = buildConversation(intent, context);
         List<String> executedTools = new ArrayList<>();
         Map<String, Object> metadataCollector = new HashMap<>();
+        List<Map<String, Object>> executionSteps = new ArrayList<>();
+        long agentStartTime = System.currentTimeMillis();
+        UUID convId = context != null ? context.conversationId() : null;
 
         for (int turn = 1; turn <= MAX_AGENT_TURNS; turn++) {
             log.debug("SchedulingAgent turn {}/{}", turn, MAX_AGENT_TURNS);
+            long turnStartTime = System.currentTimeMillis();
+            if (activityPublisher != null && convId != null) {
+                activityPublisher.publishTurnStart(convId, "SchedulingAgent", turn, MAX_AGENT_TURNS, messages.size(), toolDefinitions.size());
+            }
 
             LlmToolCallResponse llmResponse;
             try {
@@ -245,15 +267,49 @@ public class SchedulingAgent implements Agent {
                 return failureResponse("I encountered an issue setting up your automated schedule. Please try again.", executedTools);
             }
 
+            long turnDuration = System.currentTimeMillis() - turnStartTime;
+            if (activityPublisher != null && convId != null) {
+                List<String> proposedTools = llmResponse.hasToolCalls()
+                        ? llmResponse.toolCalls().stream().map(LlmToolCall::name).toList()
+                        : List.of();
+                activityPublisher.publishTurnEnd(convId, "SchedulingAgent", turn, MAX_AGENT_TURNS, turnDuration, proposedTools);
+            }
+
             if (!llmResponse.hasToolCalls()) {
+                long synthStart = System.currentTimeMillis();
+                if (activityPublisher != null && convId != null) {
+                    activityPublisher.publishSynthesisStart(convId, "SchedulingAgent");
+                }
                 String text = llmResponse.textResponse();
                 if (text == null || text.isBlank()) {
                     return failureResponse("I was unable to schedule your task.", executedTools);
                 }
-                String formatted = com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.formatResponse(
-                        text,
+
+                List<com.luna.aggarly.aiagent.engine.model.LumenResponseBlock> backendBlocks = new ArrayList<>(
                         com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.extractBlocksFromMetadata(metadataCollector)
                 );
+
+                if (!executionSteps.isEmpty()) {
+                    Map<String, Object> planData = new LinkedHashMap<>();
+                    planData.put("title", "Scheduling & Automation Plan");
+                    planData.put("totalSteps", executionSteps.size());
+                    planData.put("totalDurationMs", System.currentTimeMillis() - agentStartTime);
+                    planData.put("steps", executionSteps);
+                    backendBlocks.add(0, com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.executionPlan(planData));
+                    metadataCollector.put("executionPlan", executionSteps);
+                }
+
+                String formatted = com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.formatResponse(
+                        text,
+                        backendBlocks
+                );
+
+                if (activityPublisher != null && convId != null) {
+                    long synthDuration = System.currentTimeMillis() - synthStart;
+                    activityPublisher.publishSynthesisEnd(convId, "SchedulingAgent", synthDuration, "Configured automated workflow & schedules");
+                    activityPublisher.publishCompleted(convId, "SchedulingAgent", System.currentTimeMillis() - agentStartTime, executedTools.size(), turn);
+                }
+
                 return AgentResponse.builder()
                         .text(formatted)
                         .toolCalls(List.copyOf(executedTools))
@@ -270,12 +326,46 @@ public class SchedulingAgent implements Agent {
                     continue;
                 }
 
+                if (activityPublisher != null && convId != null) {
+                    activityPublisher.publishToolStart(convId, "SchedulingAgent", toolName, toolCall.arguments(), turn);
+                }
+                long toolStart = System.currentTimeMillis();
+
                 try {
-                    Object typedParams = objectMapper.convertValue(toolCall.arguments(), tool.parameterType());
+                    Object rawArgs = toolCall.arguments();
+                    if (expressionEngine != null && rawArgs != null) {
+                        com.luna.aggarly.scheduler.workflow.ExecutionContext exprCtx =
+                                com.luna.aggarly.scheduler.workflow.ExecutionContext.forTask(
+                                        user != null ? user.getUserId() : null,
+                                        null,
+                                        null,
+                                        "UTC"
+                                );
+                        if (convId != null) {
+                            exprCtx.variables().put("conversationId", convId.toString());
+                        }
+                        rawArgs = expressionEngine.resolve(rawArgs, exprCtx);
+                    }
+                    Object typedParams = objectMapper.convertValue(rawArgs, tool.parameterType());
                     @SuppressWarnings("unchecked")
                     Tool<Object, Object> executableTool = (Tool<Object, Object>) tool;
                     ToolResult<Object> result = executableTool.execute(typedParams, user);
                     executedTools.add(toolName);
+
+                    long duration = System.currentTimeMillis() - toolStart;
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "SchedulingAgent", toolName, duration, toolCall.arguments(), result.getData(), result.isSuccess(), turn);
+                    }
+
+                    Map<String, Object> step = new LinkedHashMap<>();
+                    step.put("stepNumber", executionSteps.size() + 1);
+                    step.put("agentName", "SchedulingAgent");
+                    step.put("toolName", toolName);
+                    step.put("status", result.isSuccess() ? "COMPLETED" : "FAILED");
+                    step.put("durationMs", duration);
+                    step.put("input", toolCall.arguments());
+                    step.put("summary", result.isSuccess() ? "Executed " + toolName + " successfully" : "Execution failed");
+                    executionSteps.add(step);
 
                     if (result.isSuccess() && result.getData() != null) {
                         metadataCollector.put("lastScheduleAction", result.getData());
@@ -285,6 +375,10 @@ public class SchedulingAgent implements Agent {
                     messages.add(ChatMessage.toolResponse(toolName, objectMapper.writeValueAsString(result)));
                 } catch (Exception ex) {
                     log.error("Tool '{}' execution failed", toolName, ex);
+                    long duration = System.currentTimeMillis() - toolStart;
+                    if (activityPublisher != null && convId != null) {
+                        activityPublisher.publishToolEnd(convId, "SchedulingAgent", toolName, duration, toolCall.arguments(), ex.getMessage(), false, turn);
+                    }
                     messages.add(ChatMessage.toolResponse(toolName, "{\"success\":false,\"error\":\"" + ex.getMessage() + "\"}"));
                 }
             }

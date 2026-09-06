@@ -9,9 +9,24 @@ import com.luna.aggarly.user.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.UUID;
+
 @Component
 @RequiredArgsConstructor
-public class CreateReviewTool implements Tool<CreateReviewRequest, ReviewResponse> {
+public class CreateReviewTool implements Tool<CreateReviewTool.Params, ReviewResponse> {
+
+    public record Params(
+            UUID propertyId,
+            UUID bookingId,
+            int rating,
+            String comment,
+            Integer cleanlinessRating,
+            Integer accuracyRating,
+            Integer checkInRating,
+            Integer communicationRating,
+            Integer locationRating,
+            Integer valueRating
+    ) {}
 
     private final ReviewService reviewService;
 
@@ -26,8 +41,8 @@ public class CreateReviewTool implements Tool<CreateReviewRequest, ReviewRespons
     }
 
     @Override
-    public Class<CreateReviewRequest> parameterType() {
-        return CreateReviewRequest.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -41,11 +56,23 @@ public class CreateReviewTool implements Tool<CreateReviewRequest, ReviewRespons
     }
 
     @Override
-    public ToolResult<ReviewResponse> execute(CreateReviewRequest params, UserPrincipal user) {
+    public ToolResult<ReviewResponse> execute(Params params, UserPrincipal user) {
         if (user == null || user.getUserId() == null) {
             return ToolResult.failed("AUTH_REQUIRED", "User must be authenticated to submit a review.");
         }
-        ReviewResponse response = reviewService.createReview(params, user.getUserId());
+        CreateReviewRequest request = new CreateReviewRequest(
+                params.propertyId(),
+                params.bookingId(),
+                params.rating(),
+                params.comment(),
+                params.cleanlinessRating(),
+                params.accuracyRating(),
+                params.checkInRating(),
+                params.communicationRating(),
+                params.locationRating(),
+                params.valueRating()
+        );
+        ReviewResponse response = reviewService.createReview(request, user.getUserId());
         return ToolResult.ok(response);
     }
 }

@@ -1,20 +1,35 @@
 package com.luna.aggarly.aiagent.tool.booking;
 
+import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.luna.aggarly.aiagent.schema.JsonSchemaService;
 import com.luna.aggarly.aiagent.tool.Tool;
 import com.luna.aggarly.aiagent.tool.ToolResult;
-import com.luna.aggarly.aiagent.tool.booking.record.BookingStatusParams;
-import com.luna.aggarly.aiagent.tool.booking.record.BookingStatusResponse;
 import com.luna.aggarly.booking.dto.BookingResponse;
 import com.luna.aggarly.booking.service.BookingService;
 import com.luna.aggarly.user.security.UserPrincipal;
+import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.UUID;
+
 @Component
 @RequiredArgsConstructor
-public class BookingStatusTool implements Tool<BookingStatusParams, BookingStatusResponse> {
+public class BookingStatusTool implements Tool<BookingStatusTool.Params, BookingStatusTool.Response> {
+
+    public record Params(
+            @NotNull
+            @JsonPropertyDescription("The unique identifier of the booking reservation.")
+            UUID bookingId
+    ) {}
+
+    public record Response(
+            UUID bookingId,
+            String status,
+            String checkIn,
+            String checkOut
+    ) {}
 
     private final BookingService bookingService;
     private final JsonSchemaService jsonSchemaService;
@@ -30,8 +45,8 @@ public class BookingStatusTool implements Tool<BookingStatusParams, BookingStatu
     }
 
     @Override
-    public Class<BookingStatusParams> parameterType() {
-        return BookingStatusParams.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -45,9 +60,9 @@ public class BookingStatusTool implements Tool<BookingStatusParams, BookingStatu
     }
 
     @Override
-    public ToolResult<BookingStatusResponse> execute(BookingStatusParams params, UserPrincipal user) {
+    public ToolResult<Response> execute(Params params, UserPrincipal user) {
         BookingResponse booking = bookingService.getById(params.bookingId(), user != null ? user.getUserId() : null);
-        BookingStatusResponse resp = new BookingStatusResponse(
+        Response resp = new Response(
                 booking.id(),
                 booking.status() != null ? booking.status() : "UNKNOWN",
                 booking.checkIn() != null ? booking.checkIn().toString() : null,
@@ -58,12 +73,11 @@ public class BookingStatusTool implements Tool<BookingStatusParams, BookingStatu
 
     @Override
     public JsonNode parameterSchema() {
-        return jsonSchemaService.generate(BookingStatusParams.class);
+        return jsonSchemaService.generate(Params.class);
     }
 
     @Override
     public JsonNode responseSchema() {
-        return jsonSchemaService.generate(BookingStatusResponse.class);
+        return jsonSchemaService.generate(Response.class);
     }
 }
-

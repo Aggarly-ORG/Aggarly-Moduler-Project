@@ -1,20 +1,34 @@
 package com.luna.aggarly.aiagent.tool.booking;
 
+import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.luna.aggarly.aiagent.schema.JsonSchemaService;
 import com.luna.aggarly.aiagent.tool.Tool;
 import com.luna.aggarly.aiagent.tool.ToolResult;
-import com.luna.aggarly.aiagent.tool.booking.record.CancellationQuoteParams;
-import com.luna.aggarly.aiagent.tool.booking.record.CancellationQuoteToolResponse;
 import com.luna.aggarly.booking.dto.CancellationQuoteResponse;
 import com.luna.aggarly.booking.service.BookingService;
 import com.luna.aggarly.user.security.UserPrincipal;
+import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.UUID;
+
 @Component
 @RequiredArgsConstructor
-public class CancellationQuoteTool implements Tool<CancellationQuoteParams, CancellationQuoteToolResponse> {
+public class CancellationQuoteTool implements Tool<CancellationQuoteTool.Params, CancellationQuoteTool.Response> {
+
+    public record Params(
+            @NotNull
+            @JsonPropertyDescription("The unique identifier of the booking reservation to evaluate.")
+            UUID bookingId
+    ) {}
+
+    public record Response(
+            UUID bookingId,
+            double refundAmount,
+            String policyExplanation
+    ) {}
 
     private final BookingService bookingService;
     private final JsonSchemaService jsonSchemaService;
@@ -30,8 +44,8 @@ public class CancellationQuoteTool implements Tool<CancellationQuoteParams, Canc
     }
 
     @Override
-    public Class<CancellationQuoteParams> parameterType() {
-        return CancellationQuoteParams.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -45,12 +59,12 @@ public class CancellationQuoteTool implements Tool<CancellationQuoteParams, Canc
     }
 
     @Override
-    public ToolResult<CancellationQuoteToolResponse> execute(CancellationQuoteParams params, UserPrincipal user) {
+    public ToolResult<Response> execute(Params params, UserPrincipal user) {
         CancellationQuoteResponse quote = bookingService.getCancellationQuote(
                 params.bookingId(),
                 user != null ? user.getUserId() : null
         );
-        CancellationQuoteToolResponse resp = new CancellationQuoteToolResponse(
+        Response resp = new Response(
                 params.bookingId(),
                 quote.refundAmount() != null ? quote.refundAmount().doubleValue() : 0.0,
                 quote.policyExplanation() != null ? quote.policyExplanation() : "FLEXIBLE"
@@ -60,12 +74,11 @@ public class CancellationQuoteTool implements Tool<CancellationQuoteParams, Canc
 
     @Override
     public JsonNode parameterSchema() {
-        return jsonSchemaService.generate(CancellationQuoteParams.class);
+        return jsonSchemaService.generate(Params.class);
     }
 
     @Override
     public JsonNode responseSchema() {
-        return jsonSchemaService.generate(CancellationQuoteToolResponse.class);
+        return jsonSchemaService.generate(Response.class);
     }
 }
-

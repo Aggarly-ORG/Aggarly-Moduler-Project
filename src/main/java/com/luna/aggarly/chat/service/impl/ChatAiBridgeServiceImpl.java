@@ -33,7 +33,7 @@ public class ChatAiBridgeServiceImpl implements ChatAiBridgeService {
     private final ObjectMapper objectMapper;
     private MessageService messageService;
 
-    public ChatAiBridgeServiceImpl(ConversationManager aiConversationManager,
+    public ChatAiBridgeServiceImpl(@Lazy ConversationManager aiConversationManager,
                                    ConversationRepository conversationRepository,
                                    UserRepository userRepository,
                                    ObjectMapper objectMapper) {
@@ -79,7 +79,7 @@ public class ChatAiBridgeServiceImpl implements ChatAiBridgeService {
                 aiConversationId = chatConvOpt.get().getAiConversationId();
             }
 
-            ChatMessageRequest aiRequest = new ChatMessageRequest(aiConversationId, userMessage);
+            ChatMessageRequest aiRequest = new ChatMessageRequest(aiConversationId, userMessage, conversationId);
             ChatMessageResponse aiResponse = aiConversationManager.handleMessage(aiRequest, principal);
 
             // Link newly created AI conversation ID to this chat conversation

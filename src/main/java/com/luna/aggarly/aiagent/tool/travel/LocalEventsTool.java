@@ -10,7 +10,11 @@ import java.util.List;
 
 @Component
 @RequiredArgsConstructor
-public class LocalEventsTool implements Tool<String, List<String>> {
+public class LocalEventsTool implements Tool<LocalEventsTool.Params, List<String>> {
+
+    public record Params(
+            String location
+    ) {}
 
     @Override
     public String name() {
@@ -23,8 +27,8 @@ public class LocalEventsTool implements Tool<String, List<String>> {
     }
 
     @Override
-    public Class<String> parameterType() {
-        return String.class;
+    public Class<Params> parameterType() {
+        return Params.class;
     }
 
     @Override
@@ -33,7 +37,7 @@ public class LocalEventsTool implements Tool<String, List<String>> {
     }
 
     @Override
-    public ToolResult<List<String>> execute(String location, UserPrincipal user) {
+    public ToolResult<List<String>> execute(Params params, UserPrincipal user) {
         return ToolResult.ok(List.of(
                 "Summer Jazz & Wine Festival (Plaza Major, July 15-18)",
                 "International Food & Food Truck Expo (River Park, July 20)"
