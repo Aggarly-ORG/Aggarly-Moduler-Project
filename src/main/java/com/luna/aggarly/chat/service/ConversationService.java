@@ -15,6 +15,8 @@ public interface ConversationService {
     ConversationResponse createConversation(CreateConversationRequest request, UUID creatorId);
 
     ConversationResponse getOrCreateAiConciergeConversation(UUID userId);
+ 
+    ConversationResponse getOrCreatePropertyConversation(UUID userId, UUID propertyId, String draftId, String title);
 
     Page<ConversationSummaryResponse> getUserConversations(UUID userId, Pageable pageable);
 

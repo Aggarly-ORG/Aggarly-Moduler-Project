@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -54,11 +55,75 @@ public class BookingController {
     }
 
     @GetMapping
-    @Operation(summary = "Get all bookings for the authenticated user", security = @SecurityRequirement(name = "bearerAuth"))
+    @Operation(summary = "Get all bookings for the authenticated user with optional status filter", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<ApiResponse<List<BookingResponse>>> getMyBookings(
-            @AuthenticationPrincipal UserPrincipal principal) {
-        List<BookingResponse> bookings = bookingService.getMyBookings(principal.getUserId());
+            @AuthenticationPrincipal UserPrincipal principal,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String status) {
+        List<BookingResponse> bookings = bookingService.getMyBookings(principal.getUserId(), status);
         return ApiResponse.ok(bookings, "User bookings retrieved successfully").toResponseEntity();
+    }
+
+    @GetMapping("/me")
+    @Operation(summary = "Get my guest trip reservations with status filter", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<List<BookingResponse>>> getMyTrips(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String status) {
+        List<BookingResponse> bookings = bookingService.getMyBookings(principal.getUserId(), status);
+        return ApiResponse.ok(bookings, "Guest journeys retrieved successfully").toResponseEntity();
+    }
+
+    @PreAuthorize("hasRole('HOST')")
+    @GetMapping("/host")
+    @Operation(summary = "Get all bookings for the authenticated host with status filter", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<List<BookingResponse>>> getHostBookings(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String status) {
+        List<BookingResponse> bookings = bookingService.getHostBookings(principal.getUserId(), status);
+        return ApiResponse.ok(bookings, "Host bookings retrieved successfully").toResponseEntity();
+    }
+
+    @GetMapping("/{bookingId}/calendar.ics")
+    @Operation(summary = "Export booking itinerary to standard iCalendar format (RFC-5545)", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<String> exportCalendar(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID bookingId) {
+        UUID userId = principal != null ? principal.getUserId() : null;
+        String icsContent = bookingService.generateCalendarIcs(bookingId, userId);
+        return ResponseEntity.ok()
+                .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "text/calendar; charset=UTF-8")
+                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"sanctuary_reservation_" + bookingId + ".ics\"")
+                .body(icsContent);
+    }
+
+    @GetMapping("/{bookingId}/invoice")
+    @Operation(summary = "Retrieve official VAT invoice & Stripe escrow receipt", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<com.luna.aggarly.booking.dto.BookingInvoiceResponse>> getInvoice(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID bookingId) {
+        UUID userId = principal != null ? principal.getUserId() : null;
+        com.luna.aggarly.booking.dto.BookingInvoiceResponse invoice = bookingService.getBookingInvoice(bookingId, userId);
+        return ApiResponse.ok(invoice, "Invoice retrieved successfully").toResponseEntity();
+    }
+
+    @GetMapping("/{bookingId}/dossier")
+    @Operation(summary = "Retrieve arrival dossier credentials including keyless vault PIN and fiber Wi-Fi", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<com.luna.aggarly.booking.dto.ArrivalDossierResponse>> getArrivalDossier(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID bookingId) {
+        UUID userId = principal != null ? principal.getUserId() : null;
+        com.luna.aggarly.booking.dto.ArrivalDossierResponse dossier = bookingService.getArrivalDossier(bookingId, userId);
+        return ApiResponse.ok(dossier, "Arrival dossier retrieved successfully").toResponseEntity();
+    }
+
+    @PostMapping("/{bookingId}/message")
+    @Operation(summary = "Send a direct message drawer dispatch regarding booking reservation", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<Void>> sendMessage(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID bookingId,
+            @RequestBody java.util.Map<String, String> payload) {
+        String message = payload.getOrDefault("message", payload.getOrDefault("text", ""));
+        bookingService.sendHostResidentMessage(bookingId, principal.getUserId(), message);
+        return ApiResponse.<Void>empty("Message dispatched").toResponseEntity();
     }
 
     @GetMapping("/{bookingId}/cancellation-quote")

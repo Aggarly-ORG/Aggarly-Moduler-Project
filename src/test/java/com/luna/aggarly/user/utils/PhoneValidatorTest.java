@@ -18,11 +18,11 @@ class PhoneValidatorTest {
     }
 
     @Test
-    @DisplayName("Should return true when phone number is null or blank (optional field)")
-    void shouldReturnTrueWhenPhoneIsNullOrBlank() {
-        assertThat(phoneValidator.isValid(null, null)).isTrue();
-        assertThat(phoneValidator.isValid("", null)).isTrue();
-        assertThat(phoneValidator.isValid("   ", null)).isTrue();
+    @DisplayName("Should return false when phone number is null or blank")
+    void shouldReturnFalseWhenPhoneIsNullOrBlank() {
+        assertThat(phoneValidator.isValid(null, null)).isFalse();
+        assertThat(phoneValidator.isValid("", null)).isFalse();
+        assertThat(phoneValidator.isValid("   ", null)).isFalse();
     }
 
     @ParameterizedTest

@@ -43,7 +43,7 @@ public class MemoryContextManager {
                     history.add(ChatMessage.toolResponse(msg.getToolName(), msg.getContent()));
                 } else {
                     String roleStr = role != null ? role.name().toLowerCase() : "user";
-                    history.add(new ChatMessage(roleStr, msg.getContent(), null));
+                    history.add(new ChatMessage(roleStr, msg.getContent(), null, null));
                 }
             }
         }

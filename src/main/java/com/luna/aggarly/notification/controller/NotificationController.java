@@ -43,16 +43,66 @@ public class NotificationController {
     private final NotificationService notificationService;
     private final NotificationDispatcher notificationDispatcher;
 
+    private final java.util.Map<UUID, java.util.List<org.springframework.web.servlet.mvc.method.annotation.SseEmitter>> sseEmitters = new java.util.concurrent.ConcurrentHashMap<>();
+
     @GetMapping
-    @Operation(summary = "Get paginated list of user notifications", security = @SecurityRequirement(name = "bearerAuth"))
+    @Operation(summary = "Get paginated list of user notifications with optional category filtering", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<ApiResponse<List<NotificationResponse>>> getNotifications(
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "false") boolean unreadOnly,
+            @RequestParam(required = false) String category,
             Pageable pageable) {
         Page<NotificationResponse> response = unreadOnly
                 ? notificationService.getUnreadNotifications(principal.getUserId(), pageable)
                 : notificationService.getUserNotifications(principal.getUserId(), pageable);
+
+        if (category != null && !category.isBlank() && !category.equalsIgnoreCase("all")) {
+            String cat = category.trim().toLowerCase();
+            List<NotificationResponse> filtered = response.getContent().stream()
+                    .filter(n -> {
+                        if (n.category() == null) return false;
+                        String nc = n.category().name().toLowerCase();
+                        if (cat.contains("book") && nc.contains("book")) return true;
+                        if (cat.contains("messag") && nc.contains("messag")) return true;
+                        if (cat.contains("alert") && (nc.contains("alert") || nc.contains("price"))) return true;
+                        if (cat.contains("system") && (nc.contains("system") || nc.contains("security"))) return true;
+                        return nc.contains(cat) || cat.contains(nc);
+                    }).toList();
+            response = new org.springframework.data.domain.PageImpl<>(filtered, pageable, filtered.size());
+        }
+
         return ApiResponse.paged(response, "Notifications retrieved successfully").toResponseEntity();
+    }
+
+    @GetMapping(value = "/stream", produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
+    @Operation(summary = "Subscribe to live notification SSE dispatch stream", security = @SecurityRequirement(name = "bearerAuth"))
+    public org.springframework.web.servlet.mvc.method.annotation.SseEmitter streamNotifications(@AuthenticationPrincipal UserPrincipal principal) {
+        UUID userId = (principal != null) ? principal.getUserId() : UUID.randomUUID();
+        org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter = new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(300_000L);
+
+        sseEmitters.computeIfAbsent(userId, k -> new java.util.concurrent.CopyOnWriteArrayList<>()).add(emitter);
+
+        emitter.onCompletion(() -> removeEmitter(userId, emitter));
+        emitter.onTimeout(() -> removeEmitter(userId, emitter));
+        emitter.onError(e -> removeEmitter(userId, emitter));
+
+        try {
+            emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
+                    .name("CONNECT")
+                    .data(Map.of("status", "CONNECTED", "userId", userId, "timestamp", Instant.now())));
+        } catch (Exception ignored) {}
+
+        return emitter;
+    }
+
+    private void removeEmitter(UUID userId, org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter) {
+        java.util.List<org.springframework.web.servlet.mvc.method.annotation.SseEmitter> list = sseEmitters.get(userId);
+        if (list != null) {
+            list.remove(emitter);
+            if (list.isEmpty()) {
+                sseEmitters.remove(userId);
+            }
+        }
     }
 
     @GetMapping("/unread-summary")
@@ -80,7 +130,7 @@ public class NotificationController {
         return ApiResponse.ok(body, "Notification sent").toResponseEntity();
     }
 
-    @PatchMapping("/{id}/read")
+    @org.springframework.web.bind.annotation.RequestMapping(value = "/{id}/read", method = {org.springframework.web.bind.annotation.RequestMethod.PATCH, org.springframework.web.bind.annotation.RequestMethod.POST})
     @Operation(summary = "Mark a notification as read", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<ApiResponse<Void>> markAsRead(
             @AuthenticationPrincipal UserPrincipal principal,
@@ -89,7 +139,7 @@ public class NotificationController {
         return ApiResponse.<Void>empty("Notification marked as read").toResponseEntity();
     }
 
-    @PatchMapping("/read-all")
+    @org.springframework.web.bind.annotation.RequestMapping(value = "/read-all", method = {org.springframework.web.bind.annotation.RequestMethod.PATCH, org.springframework.web.bind.annotation.RequestMethod.POST})
     @Operation(summary = "Mark all notifications as read", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<ApiResponse<Integer>> markAllAsRead(
             @AuthenticationPrincipal UserPrincipal principal) {

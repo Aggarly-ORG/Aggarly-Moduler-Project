@@ -118,6 +118,15 @@ public final class PropertySpecification {
                     )
             );
         }
+
+        if (filter.capacity().minBathrooms() != null) {
+            predicates.add(
+                    cb.greaterThanOrEqualTo(
+                            root.get("bathrooms"),
+                            filter.capacity().minBathrooms()
+                    )
+            );
+        }
     }
 
     private static void addPriceFilters(

@@ -10,4 +10,6 @@ import java.util.UUID;
 @Repository
 public interface PaymentAttemptRepository extends JpaRepository<PaymentAttempt, UUID> {
     List<PaymentAttempt> findByPaymentIdOrderByCreatedAtDesc(UUID paymentId);
+
+    List<PaymentAttempt> findByRadarRiskScoreGreaterThanEqualOrderByCreatedAtDesc(Integer minScore);
 }

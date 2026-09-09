@@ -76,6 +76,32 @@ public class WishlistController {
         return ApiResponse.ok(response, "Wishlist updated successfully").toResponseEntity();
     }
 
+    @PutMapping("/{wishlistId}/rename")
+    @Operation(summary = "Rename wishlist collection title and description", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<WishlistResponse>> renameWishlist(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID wishlistId,
+            @Valid @RequestBody UpdateWishlistRequest request) {
+        WishlistResponse response = wishlistService.updateWishlist(wishlistId, request, principal.getUserId());
+        return ApiResponse.ok(response, "Wishlist renamed successfully").toResponseEntity();
+    }
+
+    @PostMapping("/{wishlistId}/share")
+    @Operation(summary = "Generate an unguessable private shared-board link token", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<WishlistResponse>> shareWishlist(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID wishlistId) {
+        WishlistResponse response = wishlistService.generateShareToken(wishlistId, principal.getUserId());
+        return ApiResponse.ok(response, "Share token generated successfully").toResponseEntity();
+    }
+
+    @GetMapping("/shared/{shareToken}")
+    @Operation(summary = "Retrieve a shared wishlist collection by token (Public)")
+    public ResponseEntity<ApiResponse<WishlistResponse>> getSharedWishlist(@PathVariable String shareToken) {
+        WishlistResponse response = wishlistService.getWishlistByShareToken(shareToken);
+        return ApiResponse.ok(response, "Shared wishlist retrieved successfully").toResponseEntity();
+    }
+
     @DeleteMapping("/{wishlistId}")
     @Operation(summary = "Delete a wishlist collection", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<ApiResponse<Void>> deleteWishlist(
@@ -85,7 +111,7 @@ public class WishlistController {
         return ApiResponse.<Void>empty("Wishlist deleted successfully").toResponseEntity();
     }
 
-    @PostMapping("/{wishlistId}/properties")
+    @PostMapping(value = {"/{wishlistId}/properties", "/{wishlistId}/items"})
     @Operation(summary = "Add a property bookmark to a wishlist", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<ApiResponse<WishlistItemResponse>> addPropertyToWishlist(
             @AuthenticationPrincipal UserPrincipal principal,
@@ -95,7 +121,7 @@ public class WishlistController {
         return ApiResponse.created(response, "Property added to wishlist").toResponseEntity();
     }
 
-    @DeleteMapping("/{wishlistId}/properties/{propertyId}")
+    @DeleteMapping(value = {"/{wishlistId}/properties/{propertyId}", "/{wishlistId}/items/{propertyId}"})
     @Operation(summary = "Remove a property bookmark from a wishlist", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<ApiResponse<Void>> removePropertyFromWishlist(
             @AuthenticationPrincipal UserPrincipal principal,
@@ -103,6 +129,15 @@ public class WishlistController {
             @PathVariable UUID propertyId) {
         wishlistService.removePropertyFromWishlist(wishlistId, propertyId, principal.getUserId());
         return ApiResponse.<Void>empty("Property removed from wishlist").toResponseEntity();
+    }
+
+    @DeleteMapping("/properties/{propertyId}")
+    @Operation(summary = "Remove a property bookmark from all wishlists of the current user", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<Void>> removePropertyFromAllWishlists(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID propertyId) {
+        wishlistService.removePropertyFromAllUserWishlists(principal.getUserId(), propertyId);
+        return ApiResponse.<Void>empty("Property removed from wishlists").toResponseEntity();
     }
 
     @GetMapping("/check")

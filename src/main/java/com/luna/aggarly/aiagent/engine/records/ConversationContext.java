@@ -10,14 +10,19 @@ public record ConversationContext(
         UUID conversationId,
         AiSearchContext activeSearchContext,
         List<AiUserMemory> userMemories,
-        List<ChatMessage> conversationHistory
+        List<ChatMessage> conversationHistory,
+        String screenshotUrl
 ) {
+    public ConversationContext(UUID conversationId, AiSearchContext activeSearchContext, List<AiUserMemory> userMemories, List<ChatMessage> conversationHistory) {
+        this(conversationId, activeSearchContext, userMemories, conversationHistory, null);
+    }
+
     public ConversationContext(AiSearchContext activeSearchContext, List<AiUserMemory> userMemories) {
-        this(null, activeSearchContext, userMemories, List.of());
+        this(null, activeSearchContext, userMemories, List.of(), null);
     }
 
     public ConversationContext(AiSearchContext activeSearchContext, List<AiUserMemory> userMemories, List<ChatMessage> conversationHistory) {
-        this(null, activeSearchContext, userMemories, conversationHistory);
+        this(null, activeSearchContext, userMemories, conversationHistory, null);
     }
 
     public String activeFilters() {

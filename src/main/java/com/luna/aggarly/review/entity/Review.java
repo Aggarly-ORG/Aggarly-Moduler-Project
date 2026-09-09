@@ -57,4 +57,16 @@ public class Review extends BaseEntity {
 
     @Column(name = "value_rating")
     private Integer valueRating;
+
+    @Column(name = "quietude_rating")
+    private Integer quietudeRating;
+
+    @Column(name = "optics_rating")
+    private Integer opticsRating;
+
+    @Column(name = "host_response", columnDefinition = "TEXT")
+    private String hostResponse;
+
+    @Column(name = "host_responded_at")
+    private java.time.Instant hostRespondedAt;
 }

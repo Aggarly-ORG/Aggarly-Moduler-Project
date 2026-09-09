@@ -10,6 +10,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 @Slf4j
 @Component
@@ -20,7 +22,7 @@ public class PropertyImageEventListener {
     private final VisionVectorCleanupService vectorCleanupService;
 
     @Async("visionWorkerExecutor")
-    @EventListener
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onPropertyImageUploaded(PropertyImageUploadedEvent event) {
         log.info("Received PropertyImageUploadedEvent: imageId={}, propertyId={}, isCover={}",
                 event.imageId(), event.propertyId(), event.isCover());
@@ -29,7 +31,7 @@ public class PropertyImageEventListener {
     }
 
     @Async("visionWorkerExecutor")
-    @EventListener
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onPropertyImageReplaced(PropertyImageReplacedEvent event) {
         log.info("Received PropertyImageReplacedEvent: imageId={}, propertyId={}", event.imageId(), event.propertyId());
         vectorCleanupService.removeImagePoint(event.imageId());
@@ -37,7 +39,7 @@ public class PropertyImageEventListener {
     }
 
     @Async("visionWorkerExecutor")
-    @EventListener
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onPropertyImageDeleted(PropertyImageDeletedEvent event) {
         log.info("Received PropertyImageDeletedEvent: imageId={}, propertyId={}", event.imageId(), event.propertyId());
         vectorCleanupService.removeImagePoint(event.imageId());
@@ -45,7 +47,7 @@ public class PropertyImageEventListener {
     }
 
     @Async("visionWorkerExecutor")
-    @EventListener
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onPropertyDeleted(PropertyDeletedEvent event) {
         log.info("Received PropertyDeletedEvent: propertyId={}", event.propertyId());
         vectorCleanupService.removePropertyPoints(event.propertyId());

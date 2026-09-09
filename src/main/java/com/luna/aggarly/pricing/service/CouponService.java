@@ -14,5 +14,7 @@ public interface CouponService {
     void redeemCoupon(String code, UUID userId, UUID bookingId);
     CouponValidationResponse validateCoupon(String code, BigDecimal subtotal, UUID userId);
     Page<CouponResponse> getAllCoupons(Pageable pageable);
+    Page<CouponResponse> getAllCoupons(String tier, Boolean seasonal, Pageable pageable);
     void deactivateCoupon(UUID couponId);
+    com.luna.aggarly.pricing.dto.CouponMetricsResponse getMetrics();
 }

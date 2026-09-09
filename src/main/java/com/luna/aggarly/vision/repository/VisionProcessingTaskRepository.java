@@ -25,7 +25,13 @@ public interface VisionProcessingTaskRepository extends JpaRepository<VisionProc
 
     List<VisionProcessingTask> findByStatus(VisionTaskStatus status);
 
+    List<VisionProcessingTask> findByStatusIn(List<VisionTaskStatus> statuses);
+
     long countByStatus(VisionTaskStatus status);
+
+    @Modifying
+    @Query("DELETE FROM VisionProcessingTask t WHERE t.status = :status")
+    int deleteTasksByStatus(@Param("status") VisionTaskStatus status);
 
     @Modifying
     @Query("UPDATE VisionProcessingTask t SET t.status = 'PROCESSING', t.workerId = :workerId, t.workerInstanceId = :workerInstanceId, t.leaseUntil = :leaseUntil, t.heartbeatAt = :heartbeatAt, t.startedAt = :startedAt WHERE t.id = :taskId AND t.status = 'QUEUED'")

@@ -154,4 +154,11 @@ public class ScheduledTaskController {
         Page<TaskExecutionResponse> response = scheduledTaskService.getTaskExecutions(id, userId, pageable);
         return ApiResponse.paged(response, "Task executions retrieved").toResponseEntity();
     }
+
+    @GetMapping("/metrics")
+    @Operation(summary = "Get scheduler telemetry and cluster performance metrics", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<com.luna.aggarly.scheduler.dto.ScheduledTaskMetricsResponse>> getMetrics() {
+        com.luna.aggarly.scheduler.dto.ScheduledTaskMetricsResponse response = scheduledTaskService.getMetrics();
+        return ApiResponse.ok(response, "Scheduler metrics retrieved successfully").toResponseEntity();
+    }
 }

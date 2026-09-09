@@ -525,12 +525,6 @@ public class SupportAgent implements Agent {
                 );
 
                 if (!executionSteps.isEmpty()) {
-                    Map<String, Object> planData = new LinkedHashMap<>();
-                    planData.put("title", "Support & Resolution Plan");
-                    planData.put("totalSteps", executionSteps.size());
-                    planData.put("totalDurationMs", System.currentTimeMillis() - agentStartTime);
-                    planData.put("steps", executionSteps);
-                    backendBlocks.add(0, com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.executionPlan(planData));
                     metadataCollector.put("executionPlan", executionSteps);
                 }
 

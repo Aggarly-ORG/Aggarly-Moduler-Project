@@ -26,4 +26,5 @@ public interface ScheduledTaskService {
     void runNow(UUID taskId, UUID userId);
 
     Page<TaskExecutionResponse> getTaskExecutions(UUID taskId, UUID userId, Pageable pageable);
+    com.luna.aggarly.scheduler.dto.ScheduledTaskMetricsResponse getMetrics();
 }

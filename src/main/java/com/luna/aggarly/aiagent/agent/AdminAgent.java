@@ -434,14 +434,6 @@ public class AdminAgent implements Agent {
                 }
 
                 List<com.luna.aggarly.aiagent.engine.model.LumenResponseBlock> backendBlocks = new ArrayList<>();
-                if (!executionSteps.isEmpty()) {
-                    Map<String, Object> planData = new LinkedHashMap<>();
-                    planData.put("title", "Administrative Operations Plan");
-                    planData.put("totalSteps", executionSteps.size());
-                    planData.put("totalDurationMs", System.currentTimeMillis() - agentStartTime);
-                    planData.put("steps", executionSteps);
-                    backendBlocks.add(0, com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.executionPlan(planData));
-                }
 
                 String formattedJson = com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.formatResponse(
                         text,
@@ -739,10 +731,19 @@ public class AdminAgent implements Agent {
                 ? "\n\nActive Search Context: " + context.activeSearchContext().getFiltersJson()
                 : "";
 
+        boolean isBrowserCoPilotTurn = intent != null
+                && intent.rawMessage() != null
+                && intent.rawMessage().contains("[PAGE_CONTEXT]");
+
         String dynamicSystemPrompt = ADMIN_AGENT_SYSTEM_PROMPT
                 + "\n\nCurrent System Date and Time: " + currentTime
                 + memoryBlock
-                + activeFilters;
+                + activeFilters
+                + (isBrowserCoPilotTurn ? LumenBrowserAgentProtocol.UNIVERSAL_COMPUTER_USE_PROMPT : "");
+
+        if (isBrowserCoPilotTurn) {
+            log.info("AdminAgent: [PAGE_CONTEXT] detected — injecting Universal Lumen Computer-Use instructions");
+        }
         messages.add(ChatMessage.system(dynamicSystemPrompt));
         if (context != null && context.conversationHistory() != null && !context.conversationHistory().isEmpty()) {
             messages.addAll(context.conversationHistory());

@@ -10,5 +10,13 @@ public record UserProfileSummaryResponse(
         String displayName,
         String username,
         String avatarUrl,
-        String bio
-) {}
+        String bio,
+        java.util.Set<String> roles
+) {
+    public UserProfileSummaryResponse(
+            UUID id, String email, String firstName, String lastName,
+            String displayName, String username, String avatarUrl, String bio
+    ) {
+        this(id, email, firstName, lastName, displayName, username, avatarUrl, bio, java.util.Set.of("GUEST"));
+    }
+}

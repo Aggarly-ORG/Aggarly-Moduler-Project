@@ -43,6 +43,18 @@ public class AiToolInvocation extends BaseEntity {
     private Integer completionTokens;
     private Double estimatedCostUsd;
 
+    @Column(name = "agent_name", length = 100)
+    private String agentName;
+
+    @Column(length = 50)
+    private String initiator;
+
+    @Column(name = "inference_duration_ms")
+    private Long inferenceDurationMs;
+
+    @Column(name = "tool_execution_duration_ms")
+    private Long toolExecutionDurationMs;
+
     @Column(nullable = false)
     private Instant executedAt;
 }

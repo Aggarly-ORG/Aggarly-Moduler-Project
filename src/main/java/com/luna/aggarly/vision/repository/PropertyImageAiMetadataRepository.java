@@ -38,4 +38,6 @@ public interface PropertyImageAiMetadataRepository extends JpaRepository<Propert
 
     @Query("SELECT m FROM PropertyImageAiMetadata m WHERE m.property.id = :propertyId AND m.moderationStatus = 'APPROVED' AND m.processingStatus = 'COMPLETED'")
     List<PropertyImageAiMetadata> findUsableByPropertyId(@Param("propertyId") UUID propertyId);
+
+    long countByQdrantPointIdIsNotNull();
 }

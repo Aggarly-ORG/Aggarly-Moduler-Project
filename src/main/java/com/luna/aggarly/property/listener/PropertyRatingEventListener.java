@@ -2,6 +2,7 @@ package com.luna.aggarly.property.listener;
 
 import com.luna.aggarly.property.entity.Property;
 import com.luna.aggarly.property.repository.PropertyRepository;
+import com.luna.aggarly.review.dto.RatingSummary;
 import com.luna.aggarly.review.event.ReviewCreatedEvent;
 import com.luna.aggarly.review.event.ReviewDeletedEvent;
 import com.luna.aggarly.review.repository.ReviewRepository;
@@ -41,12 +42,10 @@ public class PropertyRatingEventListener {
 
     private void recalculatePropertyRating(UUID propertyId) {
         propertyRepository.findById(propertyId).ifPresent(property -> {
-            Object[] summary = reviewRepository.getRatingSummaryByPropertyId(propertyId);
-            if (summary != null && summary.length > 0 && summary[0] != null) {
-                Double avg = (Double) summary[0];
-                long count = ((Number) summary[1]).longValue();
-                property.setAvgRating(BigDecimal.valueOf(avg).setScale(2, RoundingMode.HALF_UP));
-                property.setReviewCount((int) count);
+            RatingSummary summary = reviewRepository.getRatingSummaryByPropertyId(propertyId);
+            if (summary != null && summary.averageRating() != null) {
+                property.setAvgRating(BigDecimal.valueOf(summary.averageRating()).setScale(2, RoundingMode.HALF_UP));
+                property.setReviewCount(summary.totalReviews().intValue());
             } else {
                 property.setAvgRating(BigDecimal.ZERO);
                 property.setReviewCount(0);

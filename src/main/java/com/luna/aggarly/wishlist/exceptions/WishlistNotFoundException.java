@@ -9,4 +9,8 @@ public class WishlistNotFoundException extends AggarlyException {
     public WishlistNotFoundException(UUID id) {
         super("Wishlist not found: " + id, HttpStatus.NOT_FOUND, "WISHLIST_NOT_FOUND");
     }
+
+    public WishlistNotFoundException(String message) {
+        super(message, HttpStatus.NOT_FOUND, "WISHLIST_NOT_FOUND");
+    }
 }

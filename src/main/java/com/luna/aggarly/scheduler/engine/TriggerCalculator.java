@@ -58,7 +58,7 @@ public class TriggerCalculator {
         if (config.has("executeAt")) {
             String executeAtStr = config.get("executeAt").asText();
             try {
-                return Instant.parse(executeAtStr);
+                return Instant.ofEpochSecond((long)Double.parseDouble(executeAtStr));
             } catch (Exception ignored) {
                 LocalDateTime ldt = LocalDateTime.parse(executeAtStr);
                 return ldt.atZone(zone).toInstant();

@@ -126,6 +126,10 @@ app:
     frontend-redirect-url: ${OAUTH2_REDIRECT_URL:http://localhost:3000/oauth2/callback}
     refresh-expiration-days: 7
 
+  booking:
+    payment-timeout-minutes: ${BOOKING_PAYMENT_TIMEOUT_MINUTES:15}
+    expiration-poll-interval-ms: ${BOOKING_EXPIRATION_POLL_INTERVAL_MS:60000}
+
 # ===================================================================
 # Vision & Vector Engine Configuration
 # ===================================================================
@@ -238,5 +242,3 @@ aggarly:
     clip-service:
       url: ${CLIP_SERVICE_URL:http://localhost:8000}
       timeout-ms: 5000
-
-

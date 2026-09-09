@@ -19,6 +19,8 @@ public interface CleaningTaskRepository extends JpaRepository<CleaningTask, UUID
 
     Page<CleaningTask> findByHostIdOrderByScheduledDateDesc(UUID hostId, Pageable pageable);
 
+    List<CleaningTask> findByHostIdOrderByScheduledDateDesc(UUID hostId);
+
     Page<CleaningTask> findByAssignedCleanerIdOrderByScheduledDateDesc(UUID assignedCleanerId, Pageable pageable);
 
     Page<CleaningTask> findByPropertyIdOrderByScheduledDateDesc(UUID propertyId, Pageable pageable);

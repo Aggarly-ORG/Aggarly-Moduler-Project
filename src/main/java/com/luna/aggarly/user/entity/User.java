@@ -74,6 +74,25 @@ public class User extends BaseEntity {
     @Builder.Default
     private boolean identityVerified = false;
 
+    @Column(name = "status", length = 32)
+    @Builder.Default
+    private String status = "ACTIVE";
+
+    @Column(name = "kyc_status", length = 32)
+    @Builder.Default
+    private String kycStatus = "UNVERIFIED";
+
+    @Column(name = "kyc_tier", length = 16)
+    @Builder.Default
+    private String kycTier = "TIER_I";
+
+    @Column(name = "kyc_verified_at")
+    private java.time.Instant kycVerifiedAt;
+
+    @Column(name = "trust_score")
+    @Builder.Default
+    private Integer trustScore = 85;
+
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
         name = "user_roles",

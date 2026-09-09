@@ -15,8 +15,8 @@ import com.luna.aggarly.property.service.PropertyService;
 import com.luna.aggarly.user.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 
@@ -144,7 +144,7 @@ public class RecommendationTool implements Tool<RecommendationTool.Params, Recom
 
         int limit = (params.limit() != null && params.limit() > 0) ? Math.min(params.limit(), 20) : 5;
         Sort sort = Sort.by(Sort.Direction.DESC, "avgRating").and(Sort.by(Sort.Direction.DESC, "reviewCount"));
-        Page<PropertyResponse> page = propertyService.searchProperties(searchRequest, PageRequest.of(0, limit, sort));
+        Slice<PropertyResponse> page = propertyService.searchProperties(searchRequest, PageRequest.of(0, limit, sort));
 
         List<Response.Item> items = page.getContent().stream()
                 .map(this::mapToItem)

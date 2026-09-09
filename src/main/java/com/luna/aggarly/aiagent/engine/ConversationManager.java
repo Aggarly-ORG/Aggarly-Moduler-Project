@@ -75,13 +75,14 @@ public class ConversationManager {
     @Transactional
     public ChatMessageResponse handleMessage(ChatMessageRequest request, UserPrincipal user) {
         UUID userId = user != null ? user.getUserId() : UUID.randomUUID();
-        log.info("Handling chat message for userId={}, conversationId={}", userId, request.conversationId());
+        log.info("Handling chat message for userId={}, conversationId={}, chatConversationId={}",
+                userId, request.conversationId(), request.chatConversationId());
 
         long overallStartTime = System.currentTimeMillis();
         AgentActivityPublisher.startRecording();
 
         try {
-            AiConversation conversation = resolveOrCreateConversation(request.conversationId(), userId);
+            AiConversation conversation = resolveOrCreateConversation(request.conversationId(), request.chatConversationId(), userId);
 
             UUID chatConvId = request.chatConversationId();
             if (chatConvId == null) {
@@ -111,65 +112,17 @@ public class ConversationManager {
             persistUserMessage(conversation.getId(), request.content());
 
             ConversationContext context = memoryContextManager.loadContext(conversation.getId(), userId);
-            context = new ConversationContext(effectiveBroadcastId, context.activeSearchContext(), context.userMemories(), context.conversationHistory());
+            context = new ConversationContext(effectiveBroadcastId, context.activeSearchContext(), context.userMemories(), context.conversationHistory(), request.screenshotUrl());
 
             activityPublisher.publishThinkingEnd(effectiveBroadcastId, System.currentTimeMillis() - thinkStart, "Context & memories loaded (" + (context.conversationHistory() != null ? context.conversationHistory().size() : 0) + " messages in history)");
 
-            long intentStart = System.currentTimeMillis();
-            activityPublisher.publishIntentStart(effectiveBroadcastId, request.content());
-
             ClassifiedIntent intent = intentClassifier.classify(request.content(), context);
             String agentName = resolveAgentNameForCategory(intent.category());
-            activityPublisher.publishIntentEnd(effectiveBroadcastId, intent.category().name(), 0.95, agentName, System.currentTimeMillis() - intentStart);
 
             AgentResponse response = agentRouter.route(intent, context, user);
 
-            // Enrich response with the complete timeline of recorded events (Thinking, Intent, Turns, Tools, Synthesis, Completion)
-            List<com.luna.aggarly.aiagent.dto.activity.AgentActivityEvent> recordedEvents = AgentActivityPublisher.getRecordedEvents();
-            if (!recordedEvents.isEmpty() && response != null && response.getText() != null) {
-                Map<String, Object> traceData = new LinkedHashMap<>();
-                traceData.put("title", "Execution Plan & Live Trace");
-                traceData.put("totalDurationMs", System.currentTimeMillis() - overallStartTime);
-                traceData.put("totalSteps", recordedEvents.size());
-
-                List<Map<String, Object>> sanitizedEvents = new ArrayList<>();
-                List<Map<String, Object>> stepsList = new ArrayList<>();
-
-                for (com.luna.aggarly.aiagent.dto.activity.AgentActivityEvent ev : recordedEvents) {
-                    Map<String, Object> evMap = new LinkedHashMap<>();
-                    evMap.put("id", ev.id());
-                    evMap.put("eventType", ev.eventType());
-                    evMap.put("activityType", ev.activityType() != null ? ev.activityType().name() : null);
-                    evMap.put("agentName", ev.agentName());
-                    evMap.put("turn", ev.turn());
-                    evMap.put("toolName", ev.toolName());
-                    evMap.put("friendlyTitle", ev.friendlyTitle());
-                    evMap.put("status", ev.status());
-                    evMap.put("durationMs", ev.durationMs());
-                    evMap.put("inputSummary", ev.inputSummary());
-                    evMap.put("resultSummary", ev.resultSummary() != null ? ev.resultSummary() : ev.friendlyTitle());
-                    evMap.put("timestamp", ev.timestamp());
-                    sanitizedEvents.add(evMap);
-
-                    Map<String, Object> step = new LinkedHashMap<>();
-                    step.put("id", ev.id());
-                    step.put("activityType", ev.activityType() != null ? ev.activityType().name() : null);
-                    step.put("agentName", ev.agentName());
-                    step.put("toolName", ev.toolName());
-                    step.put("friendlyTitle", ev.friendlyTitle());
-                    step.put("status", ev.status());
-                    step.put("durationMs", ev.durationMs());
-                    step.put("input", ev.inputSummary());
-                    step.put("summary", ev.resultSummary() != null ? ev.resultSummary() : ev.friendlyTitle());
-                    step.put("timestamp", ev.timestamp());
-                    stepsList.add(step);
-                }
-
-                traceData.put("events", sanitizedEvents);
-                traceData.put("steps", stepsList);
-
+            if (response != null && response.getText() != null) {
                 List<com.luna.aggarly.aiagent.engine.model.LumenResponseBlock> extraBlocks = new ArrayList<>();
-                extraBlocks.add(com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.executionPlan(traceData));
 
                 if (response.getMetadataJson() != null && !response.getMetadataJson().isBlank()) {
                     try {
@@ -222,7 +175,7 @@ public class ConversationManager {
             memoryContextManager.updateContext(conversation.getId(), response);
 
             // 2. Synchronize and Bridge with Chat Module (conversations and messages tables)
-            bridgeWithChatModule(conversation, request.content(), response, userId, request.conversationId());
+            bridgeWithChatModule(conversation, request.content(), response, userId, chatConvId, request.chatConversationId() != null);
 
             return buildChatMessageResponse(conversation.getId(), response);
         } finally {
@@ -230,12 +183,15 @@ public class ConversationManager {
         }
     }
 
-    private void bridgeWithChatModule(AiConversation aiConv, String userContent, AgentResponse response, UUID userId, UUID requestConvId) {
+    private void bridgeWithChatModule(AiConversation aiConv, String userContent, AgentResponse response, UUID userId, UUID explicitChatConvId, boolean fromChatBridge) {
         try {
             // Find existing linked Chat Conversation
-            Optional<Conversation> chatConvOpt = chatConversationRepository.findByAiConversationId(aiConv.getId());
-            if (chatConvOpt.isEmpty() && requestConvId != null) {
-                chatConvOpt = chatConversationRepository.findById(requestConvId);
+            Optional<Conversation> chatConvOpt = Optional.empty();
+            if (explicitChatConvId != null) {
+                chatConvOpt = chatConversationRepository.findById(explicitChatConvId);
+            }
+            if (chatConvOpt.isEmpty()) {
+                chatConvOpt = chatConversationRepository.findByAiConversationId(aiConv.getId());
             }
 
             Conversation chatConv = chatConvOpt.orElseGet(() -> {
@@ -270,7 +226,7 @@ public class ConversationManager {
 
             // Update title and timestamp in Chat Conversation
             chatConv.setAiConversationId(aiConv.getId());
-            if (aiConv.getTitle() != null && !aiConv.getTitle().isBlank()) {
+            if (chatConv.getType() == ConversationType.AI_CONCIERGE && aiConv.getTitle() != null && !aiConv.getTitle().isBlank()) {
                 chatConv.setTitle(aiConv.getTitle());
             }
             chatConv.setLastMessageAt(Instant.now());
@@ -280,7 +236,8 @@ public class ConversationManager {
             chatConversationRepository.save(chatConv);
 
             // Persist Assistant response into chat messages & broadcast over STOMP WebSocket
-            if (messageService != null) {
+            // ONLY if this call did not originate from ChatAiBridgeService (which handles delivery directly to avoid duplicates)
+            if (!fromChatBridge && messageService != null) {
                 MessageType responseType = MessageType.TEXT;
                 String metadataJson = response.getMetadataJson();
 
@@ -345,15 +302,15 @@ public class ConversationManager {
         );
     }
 
-    private AiConversation resolveOrCreateConversation(UUID conversationId, UUID userId) {
-        if (conversationId != null) {
-            Optional<AiConversation> existing = conversationRepository.findById(conversationId);
+    private AiConversation resolveOrCreateConversation(UUID aiConversationId, UUID chatConversationId, UUID userId) {
+        if (aiConversationId != null) {
+            Optional<AiConversation> existing = conversationRepository.findById(aiConversationId);
             if (existing.isPresent()) {
                 return existing.get();
             }
 
-            // Maybe conversationId is a chat Conversation ID
-            Optional<Conversation> chatConv = chatConversationRepository.findById(conversationId);
+            // Maybe aiConversationId was actually a chat Conversation ID
+            Optional<Conversation> chatConv = chatConversationRepository.findById(aiConversationId);
             if (chatConv.isPresent()) {
                 if (chatConv.get().getAiConversationId() != null) {
                     Optional<AiConversation> linkedAiConv = conversationRepository.findById(chatConv.get().getAiConversationId());
@@ -361,12 +318,11 @@ public class ConversationManager {
                         return linkedAiConv.get();
                     }
                 }
-                // Create new AI conversation and link it
                 AiConversation newAiConv = conversationRepository.save(
                         AiConversation.builder()
                                 .userId(userId)
                                 .active(true)
-                                .title(chatConv.get().getTitle())
+                                .title(chatConv.get().getTitle() != null ? chatConv.get().getTitle() : "Lumen Assistant")
                                 .build()
                 );
                 chatConv.get().setAiConversationId(newAiConv.getId());
@@ -374,6 +330,29 @@ public class ConversationManager {
                 return newAiConv;
             }
         }
+
+        if (chatConversationId != null) {
+            Optional<Conversation> chatConv = chatConversationRepository.findById(chatConversationId);
+            if (chatConv.isPresent()) {
+                if (chatConv.get().getAiConversationId() != null) {
+                    Optional<AiConversation> linkedAiConv = conversationRepository.findById(chatConv.get().getAiConversationId());
+                    if (linkedAiConv.isPresent()) {
+                        return linkedAiConv.get();
+                    }
+                }
+                AiConversation newAiConv = conversationRepository.save(
+                        AiConversation.builder()
+                                .userId(userId)
+                                .active(true)
+                                .title(chatConv.get().getTitle() != null ? chatConv.get().getTitle() : "Lumen Assistant")
+                                .build()
+                );
+                chatConv.get().setAiConversationId(newAiConv.getId());
+                chatConversationRepository.save(chatConv.get());
+                return newAiConv;
+            }
+        }
+
         return createNewConversation(userId);
     }
 

@@ -20,6 +20,12 @@ public interface WishlistService {
     WishlistItemResponse addPropertyToWishlist(UUID wishlistId, UUID propertyId, UUID userId);
 
     void removePropertyFromWishlist(UUID wishlistId, UUID propertyId, UUID userId);
+ 
+    void removePropertyFromAllUserWishlists(UUID userId, UUID propertyId);
 
     boolean isPropertyInUserWishlist(UUID userId, UUID propertyId);
+
+    WishlistResponse generateShareToken(UUID wishlistId, UUID userId);
+
+    WishlistResponse getWishlistByShareToken(String shareToken);
 }

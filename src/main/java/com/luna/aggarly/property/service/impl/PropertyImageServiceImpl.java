@@ -5,7 +5,8 @@ import com.luna.aggarly.property.dto.request.AddPropertyImageRequest;
 import com.luna.aggarly.property.dto.response.PropertyImageResponse;
 import com.luna.aggarly.property.entity.Property;
 import com.luna.aggarly.property.entity.PropertyImage;
-import com.luna.aggarly.property.event.ImageUploadedEvent;
+import com.luna.aggarly.vision.event.PropertyImageDeletedEvent;
+import com.luna.aggarly.vision.event.PropertyImageUploadedEvent;
 import com.luna.aggarly.property.exceptions.PropertyNotFoundException;
 import com.luna.aggarly.property.exceptions.UnauthorizedPropertyAccessException;
 import com.luna.aggarly.property.repository.PropertyImageRepository;
@@ -74,7 +75,13 @@ public class PropertyImageServiceImpl implements PropertyImageService {
                 .build();
 
         PropertyImage savedImage = propertyImageRepository.save(image);
-        publisher.publishEvent(new ImageUploadedEvent(propertyId, savedImage.getId()));
+        property.getImages().add(savedImage);
+        publisher.publishEvent(new PropertyImageUploadedEvent(
+                savedImage.getId(),
+                propertyId,
+                savedImage.getObjectKey(),
+                savedImage.isCover()
+        ));
 
         return toResponse(savedImage);
     }
@@ -92,8 +99,9 @@ public class PropertyImageServiceImpl implements PropertyImageService {
         }
 
         propertyImageRepository.delete(targetImage);
+        property.getImages().remove(targetImage);
 
-        if (targetImage.isCover() && property.getImages().size() > 1) {
+        if (targetImage.isCover() && !property.getImages().isEmpty()) {
             PropertyImage nextCover = property.getImages().stream()
                     .filter(img -> !img.getId().equals(imageId))
                     .findFirst()
@@ -104,6 +112,8 @@ public class PropertyImageServiceImpl implements PropertyImageService {
                 propertyImageRepository.save(nextCover);
             }
         }
+
+        publisher.publishEvent(new PropertyImageDeletedEvent(imageId, propertyId));
     }
 
     @Override

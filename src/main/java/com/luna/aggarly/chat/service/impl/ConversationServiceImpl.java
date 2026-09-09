@@ -17,6 +17,7 @@ import com.luna.aggarly.chat.repository.ConversationRepository;
 import com.luna.aggarly.chat.repository.MessageRepository;
 import com.luna.aggarly.chat.service.ChatAiBridgeService;
 import com.luna.aggarly.chat.service.ConversationService;
+import com.luna.aggarly.property.repository.PropertyRepository;
 import com.luna.aggarly.user.entity.User;
 import com.luna.aggarly.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +41,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final ConversationParticipantRepository participantRepository;
     private final MessageRepository messageRepository;
     private final UserRepository userRepository;
+    private final PropertyRepository propertyRepository;
     private final ChatMapper chatMapper;
 
     // --- Participant Enrichment --------------------------------------------------
@@ -205,6 +207,80 @@ public class ConversationServiceImpl implements ConversationService {
                 "Hello! How can I help you plan your trip today?"
         );
         return createConversation(request, userId);
+    }
+
+    @Override
+    @Transactional
+    public ConversationResponse getOrCreatePropertyConversation(UUID userId, UUID propertyId, String draftId, String title) {
+        // 1. If property exists in DB, lookup by propertyId
+        UUID validPropertyId = null;
+        if (propertyId != null && propertyRepository.existsById(propertyId)) {
+            validPropertyId = propertyId;
+            Optional<Conversation> existing = conversationRepository.findPropertyConversation(userId, propertyId);
+            if (existing.isEmpty()) {
+                existing = conversationRepository.findByPropertyIdAndTypePropertyConversation(propertyId);
+                if (existing.isPresent()) {
+                    boolean isParticipant = existing.get().getParticipants() != null && existing.get().getParticipants().stream()
+                            .anyMatch(p -> p.getUserId() != null && p.getUserId().equals(userId));
+                    if (!isParticipant) {
+                        ConversationParticipant host = ConversationParticipant.builder()
+                                .conversation(existing.get())
+                                .userId(userId)
+                                .role(ParticipantRole.HOST)
+                                .unreadCount(0)
+                                .lastReadAt(Instant.now())
+                                .build();
+                        participantRepository.save(host);
+                    }
+                }
+            }
+            if (existing.isPresent()) {
+                return enrichResponse(chatMapper.toResponse(existing.get()));
+            }
+        }
+
+        // 2. If draftId is provided, check if draft conversation already exists
+        String draftKey = (draftId != null && !draftId.isBlank()) ? "draft:" + draftId : null;
+        if (draftKey != null) {
+            Optional<Conversation> existingDraft = conversationRepository.findDraftPropertyConversation(userId, draftKey);
+            if (existingDraft.isPresent()) {
+                return enrichResponse(chatMapper.toResponse(existingDraft.get()));
+            }
+        }
+
+        // 3. Create new conversation without violating FK constraint
+        String effectiveTitle = (title != null && !title.isBlank()) ? "Co-pilot: " + title : "Sanctuary Vision Co-pilot";
+        String effectiveName = draftKey != null ? draftKey : effectiveTitle;
+
+        Conversation conversation = Conversation.builder()
+                .type(ConversationType.PROPERTY_CONVERSATION)
+                .propertyId(validPropertyId)
+                .title(effectiveTitle)
+                .name(effectiveName)
+                .lastMessageAt(Instant.now())
+                .lastMessagePreview("Lumen Co-pilot initialized for sanctuary vision perception")
+                .build();
+
+        Conversation saved = conversationRepository.save(conversation);
+
+        ConversationParticipant host = ConversationParticipant.builder()
+                .conversation(saved)
+                .userId(userId)
+                .role(ParticipantRole.HOST)
+                .unreadCount(0)
+                .lastReadAt(Instant.now())
+                .build();
+        participantRepository.save(host);
+
+        ConversationParticipant aiBot = ConversationParticipant.builder()
+                .conversation(saved)
+                .userId(ChatAiBridgeService.AI_BOT_SYSTEM_ID)
+                .role(ParticipantRole.AI_BOT)
+                .unreadCount(0)
+                .build();
+        participantRepository.save(aiBot);
+
+        return enrichResponse(chatMapper.toResponse(saved));
     }
 
     @Override

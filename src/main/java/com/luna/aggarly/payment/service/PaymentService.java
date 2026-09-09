@@ -26,4 +26,8 @@ public interface PaymentService {
     PaymentStatus confirmPaymentForBooking(UUID bookingId, UUID userId, String paymentMethodId);
     Page<PaymentResponse> getUserPayments(UUID userId, Pageable pageable);
     EarningsSummaryResponse getEarningsSummary(String currency);
+    Page<PaymentResponse> getAllPayments(PaymentStatus status, String currency, java.time.Instant startDate, java.time.Instant endDate, Pageable pageable);
+    com.luna.aggarly.payment.dto.AdminFinancialMetricsResponse getFinancialMetrics(String currency, String period);
+    byte[] exportTaxLedgerCsv(Integer year, Integer quarter);
+    PaymentDetailResponse overrideHold(UUID bookingId);
 }

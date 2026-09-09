@@ -23,6 +23,8 @@ import java.util.*;
 public class HostAgent implements Agent {
     private static final int MAX_AGENT_TURNS = 6;
 
+
+
     private static final String HOST_AGENT_SYSTEM_PROMPT = """
         You are Aggarly's Host Co-Pilot AI Assistant.
 
@@ -563,14 +565,6 @@ public class HostAgent implements Agent {
                 }
 
                 List<com.luna.aggarly.aiagent.engine.model.LumenResponseBlock> backendBlocks = new ArrayList<>();
-                if (!executionSteps.isEmpty()) {
-                    Map<String, Object> planData = new LinkedHashMap<>();
-                    planData.put("title", "Host Operations & Analysis Plan");
-                    planData.put("totalSteps", executionSteps.size());
-                    planData.put("totalDurationMs", System.currentTimeMillis() - agentStartTime);
-                    planData.put("steps", executionSteps);
-                    backendBlocks.add(0, com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.executionPlan(planData));
-                }
 
                 String formattedJson = com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.formatResponse(
                         text,
@@ -861,10 +855,21 @@ public class HostAgent implements Agent {
                 ? "\n\nActive Search Context: " + context.activeSearchContext().getFiltersJson()
                 : "";
 
+        // Detect Browser Co-Pilot turn: user message carries [PAGE_CONTEXT] injected by DomSnapshotAgent
+        boolean isBrowserCoPilotTurn = intent != null
+                && intent.rawMessage() != null
+                && intent.rawMessage().contains("[PAGE_CONTEXT]");
+
         String dynamicSystemPrompt = HOST_AGENT_SYSTEM_PROMPT
                 + "\n\nCurrent System Date and Time: " + currentTime
                 + memoryBlock
-                + activeFilters;
+                + activeFilters
+                + (isBrowserCoPilotTurn ? LumenBrowserAgentProtocol.UNIVERSAL_COMPUTER_USE_PROMPT : "");
+
+        if (isBrowserCoPilotTurn) {
+            log.info("HostAgent: [PAGE_CONTEXT] detected — injecting Universal Lumen Computer-Use instructions");
+        }
+
         messages.add(ChatMessage.system(dynamicSystemPrompt));
         if (context != null && context.conversationHistory() != null && !context.conversationHistory().isEmpty()) {
             messages.addAll(context.conversationHistory());

@@ -19,6 +19,7 @@ public interface WishlistMapper {
                 wishlist.getName(),
                 wishlist.getDescription(),
                 wishlist.isPublic(),
+                wishlist.getShareToken(),
                 itemCount,
                 items,
                 wishlist.getCreatedAt()

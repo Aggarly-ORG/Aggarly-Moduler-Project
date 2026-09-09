@@ -80,4 +80,25 @@ public class ReviewController {
         reviewService.deleteReview(reviewId, principal.getUserId());
         return ApiResponse.<Void>empty("Review deleted successfully").toResponseEntity();
     }
+
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('HOST')")
+    @GetMapping("/reviews/host")
+    @Operation(summary = "Get aggregated reviews across all sanctuaries for the host", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<List<com.luna.aggarly.review.dto.HostReviewItemDto>>> getHostReviews(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String filter) {
+        List<com.luna.aggarly.review.dto.HostReviewItemDto> reviews = reviewService.getHostReviews(principal.getUserId(), filter);
+        return ApiResponse.ok(reviews, "Host reviews retrieved successfully").toResponseEntity();
+    }
+
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('HOST')")
+    @PostMapping("/reviews/{reviewId}/response")
+    @Operation(summary = "Submit a public curator response to a guest review", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<Void>> replyToReview(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID reviewId,
+            @RequestBody com.luna.aggarly.review.dto.CuratorReviewReplyRequest request) {
+        reviewService.respondToReview(reviewId, principal.getUserId(), request.response());
+        return ApiResponse.<Void>empty("Curator response published successfully").toResponseEntity();
+    }
 }

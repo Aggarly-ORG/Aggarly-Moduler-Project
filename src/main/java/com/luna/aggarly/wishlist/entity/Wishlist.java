@@ -36,4 +36,7 @@ public class Wishlist extends BaseEntity {
 
     @Column(name = "is_public", nullable = false)
     private boolean isPublic;
+
+    @Column(name = "share_token", length = 64, unique = true)
+    private String shareToken;
 }

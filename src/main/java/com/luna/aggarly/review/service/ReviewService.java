@@ -19,4 +19,6 @@ public interface ReviewService {
     PropertyRatingSummaryResponse getPropertyRatingSummary(UUID propertyId);
 
     void deleteReview(UUID reviewId, UUID guestId);
+    java.util.List<com.luna.aggarly.review.dto.HostReviewItemDto> getHostReviews(UUID hostId, String filter);
+    void respondToReview(UUID reviewId, UUID hostId, String response);
 }

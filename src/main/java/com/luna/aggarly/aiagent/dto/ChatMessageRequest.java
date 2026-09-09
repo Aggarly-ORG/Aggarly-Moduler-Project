@@ -10,9 +10,15 @@ public record ChatMessageRequest(
         @NotBlank(message = "Message content cannot be blank")
         String content,
 
-        UUID chatConversationId
+        UUID chatConversationId,
+
+        String screenshotUrl
 ) {
     public ChatMessageRequest(UUID conversationId, String content) {
-        this(conversationId, content, null);
+        this(conversationId, content, null, null);
+    }
+
+    public ChatMessageRequest(UUID conversationId, String content, UUID chatConversationId) {
+        this(conversationId, content, chatConversationId, null);
     }
 }

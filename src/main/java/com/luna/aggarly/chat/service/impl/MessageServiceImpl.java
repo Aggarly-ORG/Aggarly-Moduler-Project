@@ -165,7 +165,8 @@ public class MessageServiceImpl implements MessageService {
                 content.toLowerCase().contains("@lumen") ||
                 content.toLowerCase().contains("@ai")
         );
-        boolean isAiConversation = conversation.getType() == ConversationType.AI_CONCIERGE;
+        boolean isAiConversation = conversation.getType() == ConversationType.AI_CONCIERGE ||
+                                   conversation.getType() == ConversationType.PROPERTY_CONVERSATION;
 
         boolean isImageOrSkip = messageType == MessageType.IMAGE || (metadataJson != null && metadataJson.contains("\"skipAiTurn\":true"));
 
@@ -183,7 +184,7 @@ public class MessageServiceImpl implements MessageService {
                 log.info("Added AI_BOT Lumen participant to conversation {}", finalConversationId);
             }
 
-            chatAiBridgeService.processAiChatTurnAsync(finalConversationId, senderId, content);
+            chatAiBridgeService.processAiChatTurnAsync(finalConversationId, senderId, content, metadataJson);
         }
 
         return response;

@@ -73,6 +73,25 @@ public class Property extends BaseEntity {
     @Builder.Default
     private int reviewCount = 0;
 
+    @Column(name = "bortle_class")
+    @Builder.Default
+    private Integer bortleClass = 3;
+
+    @Column(name = "acoustic_ambient_db", precision = 4, scale = 1)
+    @Builder.Default
+    private BigDecimal acousticAmbientDb = new BigDecimal("25.0");
+
+    @Column(name = "astrophotography_score", precision = 3, scale = 2)
+    @Builder.Default
+    private BigDecimal astrophotographyScore = new BigDecimal("0.95");
+
+    @Column(name = "featured_spotlight")
+    @Builder.Default
+    private Boolean featuredSpotlight = false;
+
+    @Column(name = "revision_notes", columnDefinition = "TEXT")
+    private String revisionNotes;
+
     @OneToOne(mappedBy = "property", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     private Address address;
 

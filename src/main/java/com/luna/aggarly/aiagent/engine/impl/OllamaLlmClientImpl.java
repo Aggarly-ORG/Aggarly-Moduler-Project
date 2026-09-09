@@ -12,12 +12,18 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.content.Media;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Component;
+import org.springframework.util.MimeType;
 
+import java.io.InputStream;
+import java.net.URI;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -211,13 +217,42 @@ public class OllamaLlmClientImpl implements LlmClient {
                 case "system"    -> springMessages.add(new SystemMessage(msg.content()));
                 case "assistant" -> springMessages.add(new AssistantMessage(msg.content()));
                 case "tool"      -> springMessages.add(new UserMessage(
-                        String.format("TOOL EXECUTION RESULT [%s]:\n%s", 
-                                msg.toolName() != null ? msg.toolName() : "unknown", 
+                        String.format("TOOL EXECUTION RESULT [%s]:\n%s",
+                                msg.toolName() != null ? msg.toolName() : "unknown",
                                 msg.content())
                 ));
-                default          -> springMessages.add(new UserMessage(msg.content()));
+                default -> {
+                    // Strip inline SCREENSHOT_URL: line from the text — the image will be sent as Media
+                    String textContent = msg.content() == null ? "" : msg.content()
+                            .replaceAll("(?m)^SCREENSHOT_URL:.*$\\n?", "").trim();
+
+                    String imageUrl = msg.imageUrl();
+                    if (imageUrl != null && !imageUrl.isBlank()) {
+                        try {
+                            byte[] imageBytes;
+                            try (InputStream in = URI.create(imageUrl).toURL().openStream()) {
+                                imageBytes = in.readAllBytes();
+                            }
+                            // Detect mime type from URL extension; default to PNG
+                            String lower = imageUrl.toLowerCase();
+                            String mimeStr = lower.contains(".jpg") || lower.contains(".jpeg")
+                                    ? "image/jpeg"
+                                    : lower.contains(".webp") ? "image/webp" : "image/png";
+                            MimeType mimeType = MimeType.valueOf(mimeStr);
+                            Media imageMedia = new Media(mimeType, new ByteArrayResource(imageBytes));
+                            springMessages.add(UserMessage.builder().text(textContent).media(imageMedia).build());
+                            log.debug("Attached screenshot as multimodal image part ({} bytes, {})", imageBytes.length, mimeStr);
+                        } catch (Exception ex) {
+                            log.warn("Failed to download screenshot for multimodal message, falling back to text-only: {}", ex.getMessage());
+                            springMessages.add(new UserMessage(textContent));
+                        }
+                    } else {
+                        springMessages.add(new UserMessage(textContent));
+                    }
+                }
             }
         }
         return springMessages;
     }
 }
+

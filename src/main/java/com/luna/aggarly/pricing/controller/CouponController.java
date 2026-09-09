@@ -48,10 +48,21 @@ public class CouponController {
 
     @GetMapping
     @PreAuthorize("hasRole('ADMIN')")
-    @Operation(summary = "List all coupons (ADMIN only)", security = @SecurityRequirement(name = "bearerAuth"))
-    public ResponseEntity<ApiResponse<List<CouponResponse>>> getAllCoupons(Pageable pageable) {
-        Page<CouponResponse> page = couponService.getAllCoupons(pageable);
+    @Operation(summary = "List all coupons with optional tier and seasonal filtering (ADMIN only)", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<List<CouponResponse>>> getAllCoupons(
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String tier,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) Boolean seasonal,
+            Pageable pageable) {
+        Page<CouponResponse> page = couponService.getAllCoupons(tier, seasonal, pageable);
         return ApiResponse.paged(page, "Coupons retrieved successfully").toResponseEntity();
+    }
+
+    @GetMapping("/metrics")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Get aggregated coupon campaign metrics (ADMIN only)", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<com.luna.aggarly.pricing.dto.CouponMetricsResponse>> getCouponMetrics() {
+        com.luna.aggarly.pricing.dto.CouponMetricsResponse response = couponService.getMetrics();
+        return ApiResponse.ok(response, "Coupon metrics retrieved successfully").toResponseEntity();
     }
 
     @PostMapping("/{couponId}/deactivate")

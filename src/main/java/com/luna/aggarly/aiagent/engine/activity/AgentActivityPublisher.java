@@ -54,19 +54,15 @@ public class AgentActivityPublisher {
     }
 
     public void publishIntentStart(UUID conversationId, String userMessage) {
-        if (conversationId == null) return;
-        AgentActivityEvent event = AgentActivityEvent.intentStart(conversationId, userMessage);
-        broadcast(conversationId, event);
+        // Intent notification suppressed per requirements
     }
 
     public void publishIntentClassified(UUID conversationId, String category, String agentName) {
-        publishIntentEnd(conversationId, category, 0.95, agentName, 50L);
+        // Intent notification suppressed per requirements
     }
 
     public void publishIntentEnd(UUID conversationId, String category, Double confidence, String agentName, long durationMs) {
-        if (conversationId == null) return;
-        AgentActivityEvent event = AgentActivityEvent.intentEnd(conversationId, category, confidence, agentName, durationMs);
-        broadcast(conversationId, event);
+        // Intent notification suppressed per requirements
     }
 
     public void publishTurnStart(UUID conversationId, String agentName, int turn, int maxTurns) {

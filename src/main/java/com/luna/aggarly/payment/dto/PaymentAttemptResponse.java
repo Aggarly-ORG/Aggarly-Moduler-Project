@@ -16,5 +16,9 @@ public class PaymentAttemptResponse {
     private UUID id;
     private String result;
     private String gatewayErrorCode;
+    private Integer radarRiskScore;
+    private String radarRiskLevel;
+    private String threeDSecureStatus;
+    private String ipOriginCountry;
     private Instant createdAt;
 }

@@ -18,4 +18,5 @@ public interface AvailabilityService {
     void releaseDates(UUID propertyId, UUID bookingId);
 
     AvailabilitySlotResponse blockForBooking(UUID propertyId, UUID bookingId, LocalDate checkIn, LocalDate checkOut);
+    MultiSanctuaryCalendarResponse getMultiCalendar(java.util.List<UUID> propertyIds, LocalDate from, LocalDate to);
 }

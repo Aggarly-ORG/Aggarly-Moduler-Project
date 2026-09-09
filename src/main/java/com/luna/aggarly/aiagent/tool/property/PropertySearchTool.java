@@ -13,9 +13,9 @@ import com.luna.aggarly.property.service.PropertyService;
 import com.luna.aggarly.user.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 
@@ -74,8 +74,8 @@ public class PropertySearchTool implements Tool<PropertySearchTool.Params, Prope
             List<Item> properties,
             int page,
             int size,
-            long totalElements,
-            int totalPages,
+            Long totalElements,
+            Integer totalPages,
             boolean hasNext,
             String querySummary
     ) {
@@ -206,22 +206,22 @@ public class PropertySearchTool implements Tool<PropertySearchTool.Params, Prope
         }
 
         Pageable pageable = PageRequest.of(pageNum, pageSize, sort);
-        Page<PropertyResponse> resultPage = propertyService.searchProperties(searchRequest, pageable);
+        Slice<PropertyResponse> resultSlice = propertyService.searchProperties(searchRequest, pageable);
 
-        List<Response.Item> items = resultPage.getContent().stream()
+        List<Response.Item> items = resultSlice.getContent().stream()
                 .map(this::mapToItem)
                 .toList();
 
-        String summary = String.format("Found %d properties (page %d of %d).",
-                resultPage.getTotalElements(), resultPage.getNumber() + 1, resultPage.getTotalPages());
+        String summary = String.format("Found %d properties (page %d%s).",
+                items.size(), resultSlice.getNumber() + 1, resultSlice.hasNext() ? ", more available" : "");
 
         Response response = new Response(
                 items,
-                resultPage.getNumber(),
-                resultPage.getSize(),
-                resultPage.getTotalElements(),
-                resultPage.getTotalPages(),
-                resultPage.hasNext(),
+                resultSlice.getNumber(),
+                resultSlice.getSize(),
+                null,
+                null,
+                resultSlice.hasNext(),
                 summary
         );
 

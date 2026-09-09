@@ -40,4 +40,16 @@ public class PaymentAttempt extends BaseEntity {
 
     @Column(name = "gateway_error_message", length = 500)
     private String gatewayErrorMessage;
+
+    @Column(name = "radar_risk_score")
+    private Integer radarRiskScore;
+
+    @Column(name = "radar_risk_level", length = 50)
+    private String radarRiskLevel;
+
+    @Column(name = "three_d_secure_status", length = 50)
+    private String threeDSecureStatus;
+
+    @Column(name = "ip_origin_country", length = 10)
+    private String ipOriginCountry;
 }

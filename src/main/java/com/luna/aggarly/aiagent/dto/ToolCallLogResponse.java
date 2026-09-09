@@ -12,6 +12,13 @@ public record ToolCallLogResponse(
         boolean success,
         String errorCode,
         long durationMs,
+        Integer promptTokens,
+        Integer completionTokens,
+        Double estimatedCostUsd,
+        String agentName,
+        String initiator,
+        Long inferenceDurationMs,
+        Long toolExecutionDurationMs,
         Instant executedAt
 ) {
 }

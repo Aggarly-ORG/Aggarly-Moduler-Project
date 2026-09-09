@@ -113,9 +113,8 @@ public class WishlistServiceImpl implements WishlistService {
         Wishlist wishlist = wishlistRepository.findByIdAndUserId(wishlistId, userId)
                 .orElseThrow(() -> new WishlistNotFoundException(wishlistId));
 
-        if (itemRepository.existsByWishlistIdAndPropertyId(wishlistId, propertyId)) {
-            throw new DuplicateWishlistItemException(propertyId);
-        }
+        // Purge any stale/legacy row to prevent unique constraint conflicts
+        itemRepository.hardDeleteByWishlistIdAndPropertyId(wishlist.getId(), propertyId);
 
         PropertyResponse property = propertyService.getPropertyById(propertyId);
 
@@ -134,10 +133,14 @@ public class WishlistServiceImpl implements WishlistService {
         Wishlist wishlist = wishlistRepository.findByIdAndUserId(wishlistId, userId)
                 .orElseThrow(() -> new WishlistNotFoundException(wishlistId));
 
-        WishlistItem item = itemRepository.findByWishlistIdAndPropertyId(wishlist.getId(), propertyId)
-                .orElseThrow(() -> new WishlistNotFoundException(wishlistId));
+        itemRepository.hardDeleteByWishlistIdAndPropertyId(wishlist.getId(), propertyId);
+    }
 
-        itemRepository.delete(item);
+    @Override
+    @Transactional
+    public void removePropertyFromAllUserWishlists(UUID userId, UUID propertyId) {
+        if (userId == null || propertyId == null) return;
+        itemRepository.hardDeleteByPropertyIdAndUserId(propertyId, userId);
     }
 
     @Override
@@ -147,5 +150,51 @@ public class WishlistServiceImpl implements WishlistService {
         List<Wishlist> userWishlists = wishlistRepository.findByUserIdOrderByNameAsc(userId);
         return userWishlists.stream()
                 .anyMatch(wl -> itemRepository.existsByWishlistIdAndPropertyId(wl.getId(), propertyId));
+    }
+
+    @Override
+    @Transactional
+    public WishlistResponse generateShareToken(UUID wishlistId, UUID userId) {
+        Wishlist wishlist = wishlistRepository.findByIdAndUserId(wishlistId, userId)
+                .orElseThrow(() -> new WishlistNotFoundException(wishlistId));
+
+        if (wishlist.getShareToken() == null || wishlist.getShareToken().isBlank()) {
+            String token = UUID.randomUUID().toString().replace("-", "") + Long.toHexString(System.currentTimeMillis());
+            wishlist.setShareToken(token);
+            wishlist = wishlistRepository.save(wishlist);
+        }
+
+        List<WishlistItem> items = itemRepository.findByWishlistIdOrderByCreatedAtDesc(wishlistId);
+        List<WishlistItemResponse> itemResponses = items.stream()
+                .map(item -> {
+                    com.luna.aggarly.property.dto.response.PropertyResponse prop = null;
+                    try {
+                        prop = propertyService.getPropertyById(item.getPropertyId());
+                    } catch (Exception ignored) {}
+                    return wishlistMapper.toItemResponse(item, prop);
+                })
+                .toList();
+
+        return wishlistMapper.toResponse(wishlist, itemResponses.size(), itemResponses);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public WishlistResponse getWishlistByShareToken(String shareToken) {
+        Wishlist wishlist = wishlistRepository.findByShareToken(shareToken)
+                .orElseThrow(() -> new WishlistNotFoundException("Shared wishlist not found for token: " + shareToken));
+
+        List<WishlistItem> items = itemRepository.findByWishlistIdOrderByCreatedAtDesc(wishlist.getId());
+        List<WishlistItemResponse> itemResponses = items.stream()
+                .map(item -> {
+                    com.luna.aggarly.property.dto.response.PropertyResponse prop = null;
+                    try {
+                        prop = propertyService.getPropertyById(item.getPropertyId());
+                    } catch (Exception ignored) {}
+                    return wishlistMapper.toItemResponse(item, prop);
+                })
+                .toList();
+
+        return wishlistMapper.toResponse(wishlist, itemResponses.size(), itemResponses);
     }
 }

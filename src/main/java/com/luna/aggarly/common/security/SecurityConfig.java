@@ -87,13 +87,19 @@ public class SecurityConfig {
                     ).permitAll()
                     .requestMatchers(
                             "/api/v1/properties/search",
+                            "/api/v1/properties/multi-calendar",
                             "/api/v1/properties/{id}",
                             "/api/v1/storage/files/view",
                             "/api/v1/storage/files/view/**",
                             "/api/v1/vision/search",
                             "/api/v1/vision/search/**",
-                            "/api/v1/vision/image/{imageId}/metadata"
+                            "/api/v1/vision/image/{imageId}/metadata",
+                            "/api/v1/wishlists/shared/**",
+                            "/api/v1/help/articles",
+                            "/api/v1/bookings/*/calendar.ics",
+                            "/api/v1/coupons/validate"
                     ).permitAll()
+                    .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/properties").permitAll()
                     .requestMatchers(
                             "/swagger-ui.html",
                             "/swagger-ui/**",
@@ -108,6 +114,12 @@ public class SecurityConfig {
                             "/ws/**",
                             "/ws/chat/**"
                     ).permitAll()
+                    .requestMatchers(
+                            "/api/v1/admin/**",
+                            "/api/v1/vision/admin/**",
+                            "/api/v1/ai/admin/**",
+                            "/api/v1/ai/audit/**"
+                    ).hasRole("ADMIN")
                     .anyRequest().authenticated()
                 )
                 .oauth2Login(oauth2 -> oauth2

@@ -352,21 +352,13 @@ public class PlanningEngine {
     ) {
         long totalDuration = System.currentTimeMillis() - planStartTime;
 
-        // Persist structured Execution Plan as first block
         if (!executionPlanSteps.isEmpty()) {
-            Map<String, Object> planBlockData = new LinkedHashMap<>();
-            planBlockData.put("title", "Multi-Agent Execution Plan");
-            planBlockData.put("totalSteps", executionPlanSteps.size());
-            planBlockData.put("totalDurationMs", totalDuration);
-            planBlockData.put("steps", executionPlanSteps);
-
-            collectedBlocks.add(0, LumenResponseBlock.executionPlan(planBlockData));
             collectedMetadata.put("executionPlan", executionPlanSteps);
         }
 
         if (activityPublisher != null && convId != null) {
             activityPublisher.publishSynthesisStart(convId, "SupervisorPlanner");
-            activityPublisher.publishSynthesisEnd(convId, "SupervisorPlanner", 150L, "Synthesized multi-agent results & attached execution plan");
+            activityPublisher.publishSynthesisEnd(convId, "SupervisorPlanner", 150L, "Synthesized multi-agent results");
             activityPublisher.publishCompleted(convId, "SupervisorPlanner", totalDuration, allExecutedTools.size(), turnsCount);
         }
 
@@ -394,13 +386,6 @@ public class PlanningEngine {
         long totalDuration = System.currentTimeMillis() - planStartTime;
 
         if (!executionPlanSteps.isEmpty()) {
-            Map<String, Object> planBlockData = new LinkedHashMap<>();
-            planBlockData.put("title", "Multi-Agent Execution Plan");
-            planBlockData.put("totalSteps", executionPlanSteps.size());
-            planBlockData.put("totalDurationMs", totalDuration);
-            planBlockData.put("steps", executionPlanSteps);
-
-            collectedBlocks.add(0, LumenResponseBlock.executionPlan(planBlockData));
             collectedMetadata.put("executionPlan", executionPlanSteps);
         }
 

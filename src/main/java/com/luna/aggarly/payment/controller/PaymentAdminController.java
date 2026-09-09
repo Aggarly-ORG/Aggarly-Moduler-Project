@@ -50,11 +50,46 @@ public class PaymentAdminController {
         return ApiResponse.paged(page, "User payments retrieved successfully").toResponseEntity();
     }
 
-    @GetMapping("/earnings/summary")
-    @Operation(summary = "Get platform earnings summary (ADMIN only)", security = @SecurityRequirement(name = "bearerAuth"))
-    public ResponseEntity<ApiResponse<EarningsSummaryResponse>> getEarningsSummary(
-            @RequestParam(defaultValue = "USD") String currency) {
-        EarningsSummaryResponse response = paymentService.getEarningsSummary(currency);
-        return ApiResponse.ok(response, "Earnings summary calculated successfully").toResponseEntity();
+    @GetMapping
+    @Operation(summary = "Query global payments ledger (ADMIN only)", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<List<PaymentResponse>>> getAllPayments(
+            @RequestParam(required = false) com.luna.aggarly.payment.entity.enums.PaymentStatus status,
+            @RequestParam(required = false) String currency,
+            @RequestParam(required = false) java.time.Instant startDate,
+            @RequestParam(required = false) java.time.Instant endDate,
+            Pageable pageable) {
+        Page<PaymentResponse> page = paymentService.getAllPayments(status, currency, startDate, endDate, pageable);
+        return ApiResponse.paged(page, "Global ledger retrieved successfully").toResponseEntity();
+    }
+
+    @GetMapping("/metrics")
+    @Operation(summary = "Get executive financial and commercial KPIs (ADMIN only)", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<com.luna.aggarly.payment.dto.AdminFinancialMetricsResponse>> getFinancialMetrics(
+            @RequestParam(defaultValue = "EUR") String currency,
+            @RequestParam(defaultValue = "30d") String period) {
+        com.luna.aggarly.payment.dto.AdminFinancialMetricsResponse metrics = paymentService.getFinancialMetrics(currency, period);
+        return ApiResponse.ok(metrics, "Financial metrics retrieved successfully").toResponseEntity();
+    }
+
+    @GetMapping("/export")
+    @Operation(summary = "Export tax ledger and transaction report as CSV (ADMIN only)", security = @SecurityRequirement(name = "bearerAuth"))
+    public org.springframework.http.ResponseEntity<byte[]> exportTaxLedger(
+            @RequestParam(required = false) Integer year,
+            @RequestParam(required = false) Integer quarter) {
+        byte[] csv = paymentService.exportTaxLedgerCsv(year, quarter);
+        String filename = String.format("aggarly_tax_ledger_%s_Q%s.csv",
+                year != null ? year : 2026,
+                quarter != null ? quarter : 1);
+        return org.springframework.http.ResponseEntity.ok()
+                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .contentType(org.springframework.http.MediaType.parseMediaType("text/csv"))
+                .body(csv);
+    }
+
+    @org.springframework.web.bind.annotation.PostMapping("/{bookingId}/override-hold")
+    @Operation(summary = "Administrative override hold & force release escrow (ADMIN only)", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ApiResponse<PaymentDetailResponse>> overrideHold(@PathVariable UUID bookingId) {
+        PaymentDetailResponse detail = paymentService.overrideHold(bookingId);
+        return ApiResponse.ok(detail, "Hold overridden and escrow released successfully").toResponseEntity();
     }
 }

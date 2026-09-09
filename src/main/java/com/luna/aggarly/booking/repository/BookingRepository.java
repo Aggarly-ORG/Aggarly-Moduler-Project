@@ -5,6 +5,7 @@ import com.luna.aggarly.booking.entity.BookingStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -20,6 +21,12 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
     List<Booking> findByHostIdOrderByCheckInDesc(UUID hostId);
 
     List<Booking> findByStatusAndCheckOutBefore(BookingStatus status, LocalDate date);
+
+    List<Booking> findByStatusAndCreatedAtBefore(BookingStatus status, Instant cutoffTime);
+
+    List<Booking> findByStatusAndCheckInLessThanEqualAndCheckOutGreaterThanEqual(BookingStatus status, LocalDate checkIn, LocalDate checkOut);
+
+    long countByStatus(BookingStatus status);
 
     boolean existsByGuestIdAndPropertyIdAndStatus(UUID guestId, UUID propertyId, BookingStatus status);
 }

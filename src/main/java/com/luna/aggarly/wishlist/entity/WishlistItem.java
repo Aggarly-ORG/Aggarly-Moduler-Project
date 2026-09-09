@@ -21,8 +21,6 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-@SQLRestriction("is_deleted=false")
-@SQLDelete(sql = "UPDATE wishlist_items SET is_deleted = true, deleted_at = CURRENT_TIMESTAMP WHERE id = ?")
 public class WishlistItem extends BaseEntity {
 
     @Column(name = "wishlist_id", nullable = false)

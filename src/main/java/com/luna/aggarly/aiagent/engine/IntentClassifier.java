@@ -21,6 +21,16 @@ public class IntentClassifier {
     public ClassifiedIntent classify(String userMessage, ConversationContext context) {
         log.info("Classifying intent for message: {}", userMessage);
 
+        // Short-circuit: Browser Co-Pilot messages always contain [PAGE_CONTEXT].
+        if (userMessage != null && userMessage.contains("[PAGE_CONTEXT]")) {
+            if (userMessage.contains("PATH: /admin") || userMessage.contains("PATH: /manage-admin")) {
+                log.info("IntentClassifier: [PAGE_CONTEXT] detected on admin route — routing to ADMIN_MANAGEMENT");
+                return new ClassifiedIntent(IntentCategory.ADMIN_MANAGEMENT, userMessage, context);
+            }
+            log.info("IntentClassifier: [PAGE_CONTEXT] detected — routing to HOST_MANAGEMENT (browser co-pilot turn)");
+            return new ClassifiedIntent(IntentCategory.HOST_MANAGEMENT, userMessage, context);
+        }
+
         List<ChatMessage> messages = new ArrayList<>();
         String memoryBlock = context != null ? context.formatUserMemoriesBlock() : "";
 
@@ -191,7 +201,7 @@ public class IntentClassifier {
             messages.addAll(context.conversationHistory());
         }
 
-        messages.add(ChatMessage.user(userMessage));
+        messages.add(ChatMessage.user(userMessage, context != null ? context.screenshotUrl() : null));
 
         String rawCategory = llmClient.chat(messages);
         IntentCategory category;

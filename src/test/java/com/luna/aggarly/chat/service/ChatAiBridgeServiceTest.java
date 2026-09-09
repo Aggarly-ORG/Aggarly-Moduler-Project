@@ -76,7 +76,7 @@ class ChatAiBridgeServiceTest {
         when(userRepository.findById(userId)).thenReturn(Optional.of(sampleUser));
         when(aiConversationManager.handleMessage(any(ChatMessageRequest.class), any())).thenReturn(aiResponse);
 
-        chatAiBridgeService.processAiChatTurnAsync(conversationId, userId, "Search apartments in Paris");
+        chatAiBridgeService.processAiChatTurnAsync(conversationId, userId, "Search apartments in Paris", null);
 
         verify(aiConversationManager).handleMessage(any(ChatMessageRequest.class), any());
         verify(messageService).sendMessage(

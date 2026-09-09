@@ -281,6 +281,25 @@ public class LumenResponseFormatter {
             Object policy = metadataCollector.get("policyData");
             Map<String, Object> polMap = policy instanceof Map ? (Map<String, Object>) policy : objectMapper.convertValue(policy, Map.class);
             blocks.add(LumenResponseBlock.builder().type("warning").data(polMap).build());
+        } else if ("VISION_SEARCH".equals(cardType)) {
+            if (metadataCollector.containsKey("visionResults")) {
+                Map<String, Object> visionData = new LinkedHashMap<>();
+                visionData.put("results", metadataCollector.get("visionResults"));
+                if (metadataCollector.containsKey("textQuery")) {
+                    visionData.put("textQuery", metadataCollector.get("textQuery"));
+                }
+                if (metadataCollector.containsKey("queryImagePreviewUrl")) {
+                    visionData.put("queryImagePreviewUrl", metadataCollector.get("queryImagePreviewUrl"));
+                }
+                blocks.add(LumenResponseBlock.builder().type("vision_results").data(visionData).build());
+            }
+            if (metadataCollector.containsKey("properties")) {
+                blocks.add(LumenResponseBlock.propertyList((List<?>) metadataCollector.get("properties")));
+            }
+        } else if ("PROPERTY_COMPARE".equals(cardType) && metadataCollector.containsKey("compareData")) {
+            Object comp = metadataCollector.get("compareData");
+            Map<String, Object> compMap = comp instanceof Map ? (Map<String, Object>) comp : objectMapper.convertValue(comp, Map.class);
+            blocks.add(LumenResponseBlock.builder().type("compare").data(compMap).build());
         }
 
         if (!"PHOTO_TOUR".equals(cardType) && metadataCollector.containsKey("photoTour")) {
@@ -474,16 +493,7 @@ public class LumenResponseFormatter {
                     }
                 }
                 case "execution_plan" -> {
-                    int score = planRichnessScore(b);
-                    if (score > bestPlanScore) {
-                        if (bestPlanIdx >= 0) {
-                            remove[bestPlanIdx] = true;
-                        }
-                        bestPlanIdx = i;
-                        bestPlanScore = score;
-                    } else {
-                        remove[i] = true;
-                    }
+                    remove[i] = true;
                 }
                 case "confirmation" -> {
                     Object token = b.getData() != null ? b.getData().get("confirmationToken") : null;

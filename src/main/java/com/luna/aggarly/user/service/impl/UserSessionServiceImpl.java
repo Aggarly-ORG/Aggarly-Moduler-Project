@@ -47,6 +47,27 @@ public class UserSessionServiceImpl implements UserSessionService {
         String ipAddress = DeviceUtils.extractClientIp(request);
         String location = DeviceUtils.resolveLocation(ipAddress);
 
+        // Proactively clean up superseded duplicate sessions from the same device & IP for this user
+        if (deviceName != null && ipAddress != null && user.getId() != null) {
+            List<UserSession> duplicateDeviceSessions = userSessionRepository
+                    .findByUserIdAndRevokedFalseOrderByLastActiveAtDesc(user.getId())
+                    .stream()
+                    .filter(s -> deviceName.equalsIgnoreCase(s.getDeviceName()) && ipAddress.equals(s.getIpAddress()))
+                    .toList();
+
+            Instant now = Instant.now();
+            for (UserSession oldSession : duplicateDeviceSessions) {
+                oldSession.setRevoked(true);
+                oldSession.setRevokedAt(now);
+                userSessionRepository.save(oldSession);
+                if (oldSession.getFamilyId() != null) {
+                    refreshTokenRepository.revokeFamily(oldSession.getFamilyId(), now);
+                }
+                log.info("🧹 Superseded prior session {} for device '{}' / IP '{}'",
+                        oldSession.getId(), deviceName, ipAddress);
+            }
+        }
+
         UserSession session = UserSession.builder()
                 .user(user)
                 .familyId(familyId)

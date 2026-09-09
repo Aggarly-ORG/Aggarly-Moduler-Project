@@ -29,6 +29,7 @@ public class AvailabilityServiceImpl implements AvailabilityService {
     private final AvailabilitySlotRepository slotRepository;
     private final AvailabilityMapper mapper;
     private final CacheManager cacheManager;
+    private final com.luna.aggarly.property.repository.PropertyRepository propertyRepository;
     @Override
     @Transactional(readOnly = true)
     @Cacheable(
@@ -58,10 +59,32 @@ public class AvailabilityServiceImpl implements AvailabilityService {
     @Override
     @Transactional
     public void blockDates(UUID propertyId, BlockDatesRequest request) {
-        DateRangeUtils.validate(request.checkIn(), request.checkOut());
-        insertBlockedSlot(propertyId, request.checkIn(), request.checkOut(),
-                BlockReason.valueOf(request.reason()), null);
-        evictCalendarCache(propertyId,request.checkIn(),request.checkOut());
+        LocalDate checkIn = request.checkIn();
+        LocalDate checkOut = request.checkOut();
+        if (checkIn != null && checkOut != null && checkIn.equals(checkOut)) {
+            checkOut = checkIn.plusDays(1);
+        }
+        DateRangeUtils.validate(checkIn, checkOut);
+
+        BlockReason reason = BlockReason.HOST_BLOCKED;
+        if (request.reason() != null && !request.reason().isBlank()) {
+            String raw = request.reason().trim().toUpperCase();
+            try {
+                reason = BlockReason.valueOf(raw);
+            } catch (IllegalArgumentException ex) {
+                if (raw.contains("MAINTEN") || raw.contains("RENOVAT") || raw.contains("REPAIR")) {
+                    reason = BlockReason.MAINTENANCE;
+                } else if (raw.contains("BOOK")) {
+                    reason = BlockReason.BOOKED;
+                } else {
+                    reason = BlockReason.HOST_BLOCKED;
+                }
+            }
+        }
+
+        releaseRangeIfNotBooked(propertyId, checkIn, checkOut);
+        insertBlockedSlot(propertyId, checkIn, checkOut, reason, null);
+        evictCalendarCache(propertyId, checkIn, checkOut);
     }
 
     @Override
@@ -153,5 +176,60 @@ public class AvailabilityServiceImpl implements AvailabilityService {
 
             current = current.plusMonths(1);
         }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public MultiSanctuaryCalendarResponse getMultiCalendar(List<UUID> propertyIds, LocalDate from, LocalDate to) {
+        if (from == null) from = LocalDate.now();
+        if (to == null) to = from.plusDays(30);
+
+        List<MultiSanctuaryCalendarResponse.SanctuaryCalendarGrid> grids = new java.util.ArrayList<>();
+
+        for (UUID propId : propertyIds) {
+            com.luna.aggarly.property.entity.Property prop = propertyRepository.findById(propId).orElse(null);
+            String title = prop != null ? prop.getTitle() : "Sanctuary " + propId.toString().substring(0, 6);
+            java.math.BigDecimal basePrice = (prop != null && prop.getBasePricePerNight() != null)
+                    ? prop.getBasePricePerNight()
+                    : java.math.BigDecimal.valueOf(250);
+
+            List<AvailabilitySlot> blockedSlots = slotRepository.findSlotsInRange(propId, from, to);
+            List<MultiSanctuaryCalendarResponse.DailyCalendarCell> dayCells = new java.util.ArrayList<>();
+
+            LocalDate curr = from;
+            while (!curr.isAfter(to)) {
+                LocalDate day = curr;
+                boolean isBlocked = blockedSlots.stream().anyMatch(s ->
+                        !day.isBefore(s.getStartDate()) && !day.isAfter(s.getEndDate()) && !s.isAvailable());
+
+                int moonIllum = com.luna.aggarly.common.util.CelestialEphemerisCalculator.calculateMoonIlluminationPercent(day);
+                String moonPhase = com.luna.aggarly.common.util.CelestialEphemerisCalculator.calculateMoonPhaseName(day);
+                boolean lumenActive = moonIllum >= 50;
+
+                java.math.BigDecimal price = basePrice;
+                if (lumenActive) {
+                    price = price.multiply(java.math.BigDecimal.valueOf(1.18)).setScale(2, java.math.RoundingMode.HALF_UP);
+                }
+
+                dayCells.add(new MultiSanctuaryCalendarResponse.DailyCalendarCell(
+                        day,
+                        !isBlocked,
+                        price,
+                        moonIllum,
+                        moonPhase,
+                        lumenActive
+                ));
+
+                curr = curr.plusDays(1);
+            }
+
+            grids.add(new MultiSanctuaryCalendarResponse.SanctuaryCalendarGrid(
+                    propId,
+                    title,
+                    dayCells
+            ));
+        }
+
+        return new MultiSanctuaryCalendarResponse(from, to, grids);
     }
 }

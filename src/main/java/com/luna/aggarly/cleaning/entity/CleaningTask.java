@@ -79,6 +79,13 @@ public class CleaningTask extends BaseEntity {
     @Column(name = "rating_by_host")
     private Integer ratingByHost;
 
+    @Column(name = "acoustic_db_reading")
+    private Double acousticDbReading;
+
+    @Column(name = "silence_certified")
+    @Builder.Default
+    private Boolean silenceCertified = false;
+
     @OneToMany(mappedBy = "cleaningTask", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<CleaningChecklist> checklists = new ArrayList<>();

@@ -333,4 +333,38 @@ public class ScheduledTaskServiceImpl implements ScheduledTaskService {
                 .correlationId(exec.getCorrelationId())
                 .build();
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public com.luna.aggarly.scheduler.dto.ScheduledTaskMetricsResponse getMetrics() {
+        long activeCronJobs = taskRepository.findAll().stream()
+                .filter(t -> t.getStatus() == com.luna.aggarly.scheduler.entity.enums.TaskStatus.ACTIVE)
+                .count();
+
+        java.util.List<com.luna.aggarly.scheduler.entity.ScheduledTaskExecution> executions = executionRepository.findAll();
+        long totalExecutions = executions.size();
+        Instant sevenDaysAgo = Instant.now().minus(java.time.Duration.ofDays(7));
+        java.util.List<com.luna.aggarly.scheduler.entity.ScheduledTaskExecution> recent = executions.stream()
+                .filter(e -> e.getStartedAt() != null && e.getStartedAt().isAfter(sevenDaysAgo))
+                .toList();
+
+        double successRate = 100.0;
+        if (!recent.isEmpty()) {
+            long successful = recent.stream()
+                    .filter(e -> e.getStatus() == com.luna.aggarly.scheduler.entity.enums.TaskStatus.COMPLETED)
+                    .count();
+            successRate = (double) successful / recent.size() * 100.0;
+        }
+
+        int workerConcurrency = Math.max(4, Runtime.getRuntime().availableProcessors() * 2);
+        String clusterHealth = (successRate >= 90.0) ? "HEALTHY" : "DEGRADED";
+
+        return new com.luna.aggarly.scheduler.dto.ScheduledTaskMetricsResponse(
+                clusterHealth,
+                activeCronJobs,
+                Math.round(successRate * 10.0) / 10.0,
+                workerConcurrency,
+                totalExecutions
+        );
+    }
 }

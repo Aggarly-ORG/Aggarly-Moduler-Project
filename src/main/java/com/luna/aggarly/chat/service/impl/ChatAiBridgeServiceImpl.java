@@ -50,7 +50,7 @@ public class ChatAiBridgeServiceImpl implements ChatAiBridgeService {
 
     @Override
     @Async
-    public void processAiChatTurnAsync(UUID conversationId, UUID userId, String userMessage) {
+    public void processAiChatTurnAsync(UUID conversationId, UUID userId, String userMessage, String metadataJson) {
         log.info("Processing asynchronous AI chat turn for conversation {}, user {}", conversationId, userId);
         try {
             Optional<User> userOpt = Optional.empty();
@@ -79,7 +79,20 @@ public class ChatAiBridgeServiceImpl implements ChatAiBridgeService {
                 aiConversationId = chatConvOpt.get().getAiConversationId();
             }
 
-            ChatMessageRequest aiRequest = new ChatMessageRequest(aiConversationId, userMessage, conversationId);
+            // Extract screenshot URL from metadataJson if present
+            String screenshotUrl = null;
+            if (metadataJson != null && !metadataJson.isBlank()) {
+                try {
+                    com.fasterxml.jackson.databind.JsonNode meta = objectMapper.readTree(metadataJson);
+                    if (meta.has("screenshotUrl") && !meta.get("screenshotUrl").isNull()) {
+                        screenshotUrl = meta.get("screenshotUrl").asText();
+                    }
+                } catch (Exception ex) {
+                    log.warn("Could not parse metadataJson for screenshotUrl: {}", ex.getMessage());
+                }
+            }
+
+            ChatMessageRequest aiRequest = new ChatMessageRequest(aiConversationId, userMessage, conversationId, screenshotUrl);
             ChatMessageResponse aiResponse = aiConversationManager.handleMessage(aiRequest, principal);
 
             // Link newly created AI conversation ID to this chat conversation
@@ -91,7 +104,7 @@ public class ChatAiBridgeServiceImpl implements ChatAiBridgeService {
             }
 
             MessageType type = MessageType.TEXT;
-            String metadataJson = aiResponse.metadataJson();
+            String responseMetadataJson = aiResponse.metadataJson();
 
             if (aiResponse.requiresConfirmation()) {
                 type = MessageType.ACTION_CARD;
@@ -100,10 +113,10 @@ public class ChatAiBridgeServiceImpl implements ChatAiBridgeService {
                 cardMap.put("confirmationToken", aiResponse.confirmationToken());
                 cardMap.put("pendingToolName", aiResponse.pendingToolName());
                 cardMap.put("toolCalls", aiResponse.toolCalls());
-                metadataJson = objectMapper.writeValueAsString(cardMap);
+                responseMetadataJson = objectMapper.writeValueAsString(cardMap);
             }
 
-            messageService.sendMessage(conversationId, AI_BOT_SYSTEM_ID, aiResponse.content(), type, metadataJson);
+            messageService.sendMessage(conversationId, AI_BOT_SYSTEM_ID, aiResponse.content(), type, responseMetadataJson);
             log.info("Delivered AI response to conversation {}", conversationId);
 
         } catch (Exception e) {

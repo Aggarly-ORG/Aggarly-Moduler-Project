@@ -15,8 +15,17 @@ import java.util.UUID;
 @Repository
 public interface ConversationRepository extends JpaRepository<Conversation, UUID> {
 
-    @Query("SELECT c FROM Conversation c JOIN c.participants p WHERE p.userId = :userId AND p.archived = false ORDER BY c.lastMessageAt DESC")
+    @Query("SELECT c FROM Conversation c JOIN c.participants p WHERE p.userId = :userId AND p.archived = false AND c.type != com.luna.aggarly.chat.entity.enums.ConversationType.PROPERTY_CONVERSATION ORDER BY c.lastMessageAt DESC")
     Page<Conversation> findUserActiveConversations(@Param("userId") UUID userId, Pageable pageable);
+
+    @Query("SELECT c FROM Conversation c JOIN c.participants p WHERE c.type = com.luna.aggarly.chat.entity.enums.ConversationType.PROPERTY_CONVERSATION AND p.userId = :userId AND c.propertyId = :propertyId")
+    Optional<Conversation> findPropertyConversation(@Param("userId") UUID userId, @Param("propertyId") UUID propertyId);
+
+    @Query("SELECT c FROM Conversation c JOIN c.participants p WHERE c.type = com.luna.aggarly.chat.entity.enums.ConversationType.PROPERTY_CONVERSATION AND p.userId = :userId AND c.name = :draftKey")
+    Optional<Conversation> findDraftPropertyConversation(@Param("userId") UUID userId, @Param("draftKey") String draftKey);
+
+    @Query("SELECT c FROM Conversation c WHERE c.type = com.luna.aggarly.chat.entity.enums.ConversationType.PROPERTY_CONVERSATION AND c.propertyId = :propertyId")
+    Optional<Conversation> findByPropertyIdAndTypePropertyConversation(@Param("propertyId") UUID propertyId);
 
     @Query("SELECT c FROM Conversation c JOIN c.participants p1 JOIN c.participants p2 " +
            "WHERE c.type = :type AND p1.userId = :user1Id AND p2.userId = :user2Id")

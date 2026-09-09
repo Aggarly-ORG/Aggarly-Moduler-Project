@@ -64,6 +64,7 @@ public class JwtService {
         claims.put("roles", user.getRoles().stream()
                 .map(role -> role.getName())
                 .collect(Collectors.toList()));
+        claims.put("emailVerified", user.isEmailVerified());
 
         return buildToken(claims, user.getEmail());
     }
@@ -77,6 +78,7 @@ public class JwtService {
 
         if (userDetails instanceof UserPrincipal principal) {
             claims.put("userId", principal.getUserId().toString());
+            claims.put("emailVerified", principal.getUser().isEmailVerified());
             if (sessionId == null && principal.getSessionId() != null) {
                 sessionId = principal.getSessionId();
             }

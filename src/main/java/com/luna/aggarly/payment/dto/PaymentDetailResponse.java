@@ -14,6 +14,10 @@ import java.util.List;
 @AllArgsConstructor
 public class PaymentDetailResponse {
     private PaymentResponse payment;
+    private String propertyTitle;
+    private String propertyLocation;
+    private String hostDisplayName;
+    private String guestEmail;
     private List<PaymentAttemptResponse> attempts;
     private List<RefundResponse> refunds;
 }

@@ -1,5 +1,6 @@
 package com.luna.aggarly.user.mapper;
 
+import com.luna.aggarly.user.dto.response.UserAdminResponse;
 import com.luna.aggarly.user.dto.response.UserProfileResponse;
 import com.luna.aggarly.user.dto.response.UserProfileSummaryResponse;
 import com.luna.aggarly.user.entity.Role;
@@ -19,7 +20,12 @@ public interface UserMapper {
     UserProfileResponse toProfileResponse(User user);
 
     @Mapping(target = "displayName", source = "user", qualifiedByName = "resolveDisplayName")
+    @Mapping(target = "roles", source = "roles", qualifiedByName = "mapRolesToStringSet")
     UserProfileSummaryResponse toSummaryResponse(User user);
+
+    @Mapping(target = "displayName", source = "user", qualifiedByName = "resolveDisplayName")
+    @Mapping(target = "roles", source = "roles", qualifiedByName = "mapRolesToStringSet")
+    UserAdminResponse toAdminResponse(User user);
 
     @Named("mapRolesToStringSet")
     default Set<String> mapRolesToStringSet(Set<Role> roles) {

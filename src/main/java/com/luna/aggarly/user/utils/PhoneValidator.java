@@ -31,6 +31,6 @@ public class PhoneValidator implements ConstraintValidator<ValidPhone,String> {
             }
         } catch (NumberParseException ignored) {}
 
-        return false;
+        return cleaned.matches("^\\+?[0-9\\s\\-\\(\\)]{7,20}$");
     }
 }

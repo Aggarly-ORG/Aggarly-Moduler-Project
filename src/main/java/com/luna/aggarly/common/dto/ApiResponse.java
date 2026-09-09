@@ -2,6 +2,7 @@ package com.luna.aggarly.common.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Slice;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
@@ -135,6 +136,23 @@ public record ApiResponse<T>(
                 null,
                 null,
                 meta,
+                Instant.now()
+        );
+    }
+
+    public static <T> ApiResponse<List<T>> sliced(Slice<T> slice) {
+        return sliced(slice, "Data retrieved successfully");
+    }
+
+    public static <T> ApiResponse<List<T>> sliced(Slice<T> slice, String message) {
+        return new ApiResponse<>(
+                true,
+                HttpStatus.OK.value(),
+                message,
+                slice != null ? slice.getContent() : List.of(),
+                null,
+                null,
+                slice != null ? PaginationMeta.fromSlice(slice) : null,
                 Instant.now()
         );
     }

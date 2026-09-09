@@ -13,6 +13,7 @@ import com.luna.aggarly.chat.repository.ConversationParticipantRepository;
 import com.luna.aggarly.chat.repository.ConversationRepository;
 import com.luna.aggarly.chat.repository.MessageReadReceiptRepository;
 import com.luna.aggarly.chat.repository.MessageRepository;
+import com.luna.aggarly.chat.service.ConversationService;
 import com.luna.aggarly.chat.service.impl.MessageServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -184,6 +185,6 @@ class MessageServiceTest {
 
         messageService.sendMessage(conversationId, user1Id, "Find me apartments in Rome", MessageType.TEXT, null);
 
-        verify(chatAiBridgeService).processAiChatTurnAsync(conversationId, user1Id, "Find me apartments in Rome");
+        verify(chatAiBridgeService).processAiChatTurnAsync(conversationId, user1Id, "Find me apartments in Rome", null);
     }
 }

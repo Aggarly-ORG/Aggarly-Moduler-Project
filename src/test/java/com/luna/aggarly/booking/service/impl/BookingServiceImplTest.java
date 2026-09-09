@@ -25,12 +25,17 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -116,5 +121,49 @@ class BookingServiceImplTest {
         CancelBookingRequest request = new CancelBookingRequest("Reason");
 
         assertThrows(InvalidBookingStateException.class, () -> bookingService.cancelBooking(bookingId, request, guestId));
+    }
+
+    @Test
+    void expireUnconfirmedBookings_SuccessfullyExpiresOldBookings() {
+        UUID bookingId = UUID.randomUUID();
+        UUID propertyId = UUID.randomUUID();
+
+        Booking booking = Booking.builder()
+                .propertyId(propertyId)
+                .guestId(UUID.randomUUID())
+                .hostId(UUID.randomUUID())
+                .checkIn(LocalDate.now().plusDays(1))
+                .checkOut(LocalDate.now().plusDays(3))
+                .guestCount(2)
+                .status(BookingStatus.PENDING_PAYMENT)
+                .totalAmount(BigDecimal.valueOf(250))
+                .currency("USD")
+                .priceBreakdownJson("{}")
+                .build();
+        booking.setId(bookingId);
+
+        when(bookingRepository.findByStatusAndCreatedAtBefore(eq(BookingStatus.PENDING_PAYMENT), any(Instant.class)))
+                .thenReturn(List.of(booking));
+
+        bookingService.expireUnconfirmedBookings(15);
+
+        assertEquals(BookingStatus.CANCELLED, booking.getStatus());
+        verify(bookingRepository).save(booking);
+        verify(availabilityService).releaseDates(propertyId, bookingId);
+        verify(paymentService).cancelPayment(eq(bookingId), anyString());
+        verify(historyRepository).save(any());
+    }
+
+    @Test
+    void expireUnconfirmedBookings_NoOpWhenNoneFound() {
+        when(bookingRepository.findByStatusAndCreatedAtBefore(eq(BookingStatus.PENDING_PAYMENT), any(Instant.class)))
+                .thenReturn(List.of());
+
+        bookingService.expireUnconfirmedBookings(15);
+
+        verify(bookingRepository, never()).save(any());
+        verify(availabilityService, never()).releaseDates(any(), any());
+        verify(paymentService, never()).cancelPayment(any(), any());
+        verify(historyRepository, never()).save(any());
     }
 }

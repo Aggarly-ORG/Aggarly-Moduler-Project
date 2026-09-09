@@ -678,12 +678,6 @@ public class BookingAgent implements Agent {
                 );
 
                 if (!executionSteps.isEmpty()) {
-                    Map<String, Object> planData = new LinkedHashMap<>();
-                    planData.put("title", "Booking & Reservation Plan");
-                    planData.put("totalSteps", executionSteps.size());
-                    planData.put("totalDurationMs", System.currentTimeMillis() - agentStartTime);
-                    planData.put("steps", executionSteps);
-                    backendBlocks.add(0, com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.executionPlan(planData));
                     metadataCollector.put("executionPlan", executionSteps);
                 }
 
@@ -793,15 +787,6 @@ public class BookingAgent implements Agent {
                             Map.of("id", "confirm-" + token, "label", "Confirm & Proceed", "variant", "primary", "action", "ai.confirm", "confirmationToken", token),
                             Map.of("id", "cancel-" + token, "label", "Cancel", "variant", "secondary", "action", "ai.cancel", "confirmationToken", token)
                     )));
-
-                    if (!executionSteps.isEmpty()) {
-                        Map<String, Object> planData = new LinkedHashMap<>();
-                        planData.put("title", "Booking & Reservation Plan");
-                        planData.put("totalSteps", executionSteps.size());
-                        planData.put("totalDurationMs", System.currentTimeMillis() - agentStartTime);
-                        planData.put("steps", executionSteps);
-                        confBlocks.add(0, com.luna.aggarly.aiagent.engine.model.LumenResponseBlock.executionPlan(planData));
-                    }
 
                     String formattedJson = com.luna.aggarly.aiagent.engine.model.LumenResponseFormatter.formatResponse(
                             buildConfirmationMessage(toolName),
