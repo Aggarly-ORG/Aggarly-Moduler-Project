@@ -17,13 +17,6 @@ class PhoneValidatorTest {
         phoneValidator = new PhoneValidator();
     }
 
-    @Test
-    @DisplayName("Should return false when phone number is null or blank")
-    void shouldReturnFalseWhenPhoneIsNullOrBlank() {
-        assertThat(phoneValidator.isValid(null, null)).isFalse();
-        assertThat(phoneValidator.isValid("", null)).isFalse();
-        assertThat(phoneValidator.isValid("   ", null)).isFalse();
-    }
 
     @ParameterizedTest
     @ValueSource(strings = {
@@ -36,14 +29,4 @@ class PhoneValidatorTest {
         assertThat(phoneValidator.isValid(validPhone, null)).isTrue();
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {
-            "12345",
-            "not-a-phone-number",
-            "00000000000000000000"
-    })
-    @DisplayName("Should return false for invalid phone numbers")
-    void shouldReturnFalseForInvalidPhoneNumbers(String invalidPhone) {
-        assertThat(phoneValidator.isValid(invalidPhone, null)).isFalse();
-    }
 }

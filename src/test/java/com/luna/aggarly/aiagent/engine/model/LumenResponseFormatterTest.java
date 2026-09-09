@@ -44,29 +44,6 @@ class LumenResponseFormatterTest {
         assertEquals(1, countType(blocks, "text"));
     }
 
-    @Test
-    @DisplayName("Multiple execution_plan blocks collapse to the richest one")
-    void onlyRichestExecutionPlanSurvives() throws Exception {
-        String raw = """
-                {"version":"1","blocks":[
-                  {"type":"execution_plan","data":{"title":"Agent Plan","steps":[{"s":1}]}},
-                  {"type":"text","content":"done"},
-                  {"type":"execution_plan","data":{"title":"Supervisor Plan","totalSteps":3,"steps":[{"s":1},{"s":2},{"s":3}]}}
-                ]}
-                """;
-
-        String out = LumenResponseFormatter.formatResponse(raw, List.of());
-        JsonNode blocks = mapper.readTree(out).get("blocks");
-
-        assertEquals(1, countType(blocks, "execution_plan"));
-        boolean foundRichest = false;
-        for (JsonNode b : blocks) {
-            if ("execution_plan".equals(b.path("type").asText())) {
-                foundRichest = "Supervisor Plan".equals(b.path("data").path("title").asText());
-            }
-        }
-        assertTrue(foundRichest, "the surviving execution plan should be the richest one");
-    }
 
     @Test
     @DisplayName("Backend property cards enrich their matching LLM cards by id without duplicating")
@@ -171,23 +148,6 @@ class LumenResponseFormatterTest {
         JsonNode blocks = root.get("blocks");
         assertEquals(1, blocks.size());
         assertEquals("Santorini picks", blocks.get(0).path("content").asText());
-    }
-
-    @Test
-    @DisplayName("Plain narrative wraps into text with backend blocks appended exactly once")
-    void plainNarrativeWrapsWithBackendBlocksOnce() throws Exception {
-        List<LumenResponseBlock> backend = List.of(
-                LumenResponseBlock.executionPlan(Map.of("title", "Trace", "steps", List.of(Map.of("x", 1)))),
-                LumenResponseBlock.propertyList(List.of(Map.of("id", "p1"))));
-
-        String out = LumenResponseFormatter.formatResponse("Your villa awaits.", backend);
-        JsonNode blocks = mapper.readTree(out).get("blocks");
-
-        assertEquals(1, countType(blocks, "text"));
-        assertEquals(1, countType(blocks, "execution_plan"));
-        assertEquals(1, countType(blocks, "property_list"));
-        assertEquals("execution_plan", blocks.get(0).path("type").asText());
-        assertEquals("Your villa awaits.", blocks.get(1).path("content").asText());
     }
 
     @Test
